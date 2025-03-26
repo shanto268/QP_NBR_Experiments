@@ -32,8 +32,9 @@ FIG_PATH = None
 PATH_TO_EXE = None
 SPATH = None
 device_name = None
+TWPA_PUMP = None
 
-def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None):
+def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None, twpa_pump=None):
     """
     Initialize global instrument variables for use in other functions.
     
@@ -52,13 +53,14 @@ def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None
     srs : instrument object, optional
         SRS instrument for flux biasing
     """
-    global VNA, DA, SMU, LO, Drive, vs
+    global VNA, DA, SMU, LO, Drive, vs, TWPA_PUMP
     VNA = vna
     DA = da
     SMU = smu
     LO = lo
     Drive = drive
     vs = srs
+    TWPA_PUMP = twpa_pump
     
 def initializeLabberlogging(lfvna):
     global lfVNA
@@ -550,3 +552,14 @@ def acquire_IQ_data(phi, num_traces=1, acquisitionLength_sec=5, origRateMHz=300,
     timeCycle = perf_counter() - now
     logging.info(f'This step took {timeCycle:.6f} seconds.')
     return savefile
+
+    
+def set_TWPA_pump(f=6.04, power=27):
+    global TWPA_PUMP
+    TWPA_PUMP.setValue('Frequency', f*1e9)
+    TWPA_PUMP.setValue('Power', power)
+    TWPA_PUMP.setValue('Output', True)
+
+def turn_off_TWPA_pump():
+    global TWPA_PUMP
+    TWPA_PUMP.setValue('Output', False)
