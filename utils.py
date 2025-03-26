@@ -328,27 +328,49 @@ def get_vna_trace(f, span=10e6, power=5, avg=25, show_plot=False):
         Complex S21 data
     """
     global VNA, lfVNA, FIG_PATH
+    
+    # Set up VNA parameters
     set_vna(f, span, power, avg)
-    VNA.setValue('Trigger',True)
+    
+    # Trigger measurement
+    VNA.setValue('Trigger', True)
+    
+    # Get measurement data
     dF = VNA.getValue('S21')
     zData = dF['y']
-    xBG = np.arange(dF['t0'],dF['t0']+dF['shape'][0]*dF['dt'],dF['dt'])
-    td = Labber.getTraceDict(zData,x0=xBG[0],x1=xBG[-1])
-    lfVNA.addEntry({'VNA - S21':td})
+    
+    # Create frequency array from time array
+    xBG = np.arange(dF['t0'], dF['t0'] + dF['shape'][0] * dF['dt'], dF['dt'])
+    
+    # Log data in Labber
+    td = Labber.getTraceDict(zData, x0=xBG[0], x1=xBG[-1])
+    lfVNA.addEntry({'VNA - S21': td})
+    
+    # Show plot if requested
     if show_plot:
-        plt.figure()
-        plt.plot(xBG, 20 * np.log10(np.abs(zData)))
+        plt.figure(figsize=(10, 6))
+        
+        # Calculate magnitude in dB
+        mag_db = 20 * np.log10(np.abs(zData))
+        
+        # Plot magnitude
+        plt.plot(xBG, mag_db)
+        
+        # Formatting
         plt.xlabel('Frequency (GHz)')
         plt.ylabel('Log Magnitude (dB)')
         plt.grid(True, alpha=0.3)
-        plt.title(f'VNA Trace at {f} GHz')
-        plt.savefig(os.path.join(FIG_PATH, f'vna_trace_{f:.4f}'.replace('.', 'p') + '.png'))
+        plt.title(f'VNA Trace at {f:.6f} GHz')
+        
+        # Save and show
+        plt.savefig(os.path.join(FIG_PATH, f'vna_trace_{f:.6f}'.replace('.', 'p') + '.png'))
         plt.show()
+    
     return xBG, zData
 
 def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     """
-    Fit VNA trace around a given frequency guess to find exact resonance.
+    Find resonance by identifying the minimum of VNA magnitude data.
     
     Parameters:
     -----------
@@ -362,6 +384,8 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
         VNA power in dBm
     avg : int, optional
         Number of averages
+    show_plot : bool, optional
+        Whether to show the VNA trace plot
         
     Returns:
     --------
@@ -373,71 +397,70 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     global VNA, FIG_PATH, SPATH
     X, zData = get_vna_trace(f, span, power, avg, show_plot)
     
-    # Find index of frequency closest to the guess frequency
-    fguess_idx = np.abs(X - f).argmin()
+    # Calculate magnitude in dB
+    mag_db = 20 * np.log10(np.abs(zData))
     
-    plt.figure()
-    try:
-        logging.info('Trying to fit a double resonance...')
-        pars,cov = curve_fit(sumLor,X,zData.real,p0 = [0.8,0.2,0.5,X[fguess_idx],0,0.00025],bounds=([0.2,0,0.2,min(X),-0.005,0.00005],[2,0.5,1,max(X),0.005,0.0005]))
-        plt.plot(X,zData.real,label='data')
-        plt.plot(X,sumLor(X,*pars),label='fit')
-        plt.plot(X,Lor(X,pars[0],pars[3],pars[5]),label='Lor1')
-        plt.plot(X,Lor(X,pars[1],pars[3]+pars[4],pars[5]),label='Lor2')
-        A1, A2, A3, f1, shift, Gamma = pars
-        logging.info('Fit params: A1 = %.2f, A2 = %.2f, A3 = %.2f, f1 = %.6f, shift = %.6f, Gamma = %.6f'%(A1,A2,A3,f1,shift,Gamma))
-        
-        if abs(shift) < 3e-4:
-            f_phi = f1
-            fd = f_phi
-        else:
-            f_phi = f1
-            fd = f1 + shift
-            if fd > f_phi:
-                f_phi, fd = fd, f_phi
-    except:
-        logging.warning('Trying to fit a single resonance...')
+    # Find the minimum of the magnitude (the dip)
+    min_idx = np.argmin(mag_db)
+    f_phi = X[min_idx]
+    
+    # For now, set f_d the same as f_phi
+    f_d = f_phi
+    
+    logging.info(f'Resonance found at f_phi = {f_phi:.6f} GHz')
+    
+    # Create figure for fit visualization
+    plt.figure(figsize=(10, 6))
+    
+    # Plot the magnitude data
+    plt.plot(X, mag_db, 'b-', label='S21 Magnitude')
+    
+    # Plot the identified resonance and drive frequencies
+    plt.axvline(x=f_phi, color='g', linestyle=':', linewidth=2, label=f'f_phi = {f_phi:.6f} GHz')
+    plt.axvline(x=f_d, color='orange', linestyle=':', linewidth=2, label=f'f_d = {f_d:.6f} GHz')
+    
+    # Add a smoothed version of the data for clearer visualization
+    window_size = min(25, len(mag_db) // 10)  # Adjust window size based on data length
+    if window_size % 2 == 0:
+        window_size += 1  # Ensure odd window size for centered smoothing
+    
+    if window_size > 3:  # Only smooth if we have enough points
+        from scipy.signal import savgol_filter
         try:
-            pars,cov = curve_fit(Lor,X,zData.real,p0 = [0.8,X[fguess_idx],0.00025],bounds=([0.2,5.78,0.00005],[2,5.78,0.0005]))
-            plt.plot(X,zData.real,label='data')
-            plt.plot(X,Lor(X,*pars),label='fit')
-            A1, f1, Gamma = pars
-            logging.info('Fit params: A1 = %.2f, f1 = %.6f, Gamma = %.6f'%(A1,f1,Gamma))
-            f_phi = f1
-            fd = f_phi
+            mag_smoothed = savgol_filter(mag_db, window_size, 2)
+            plt.plot(X, mag_smoothed, 'r--', linewidth=2, label='Smoothed Data')
         except:
-            logging.warning('Unable to fit resonance. Using the minimum of real part as estimated resonance.')
-            plt.plot(X,zData.real,label='data')
-            pars = np.array([1.5,X[fguess_idx],0.00025])
-            cov = np.ones((len(pars),len(pars)))*np.infty
-            plt.plot(X,Lor(X,*pars),label='unfitted guess')
-            A1, f1, Gamma = pars
-            f_phi = f1
-            fd = f_phi
+            pass  # Skip smoothing if it fails
     
-    plt.title('Flux Bias: %.4f $\Phi_0$'%ph)
+    # Formatting
+    plt.title(f'Flux Bias: {ph:.4f} $\Phi_0$')
     plt.xlabel('Frequency (GHz)')
-    plt.ylabel('Re(S21)')
+    plt.ylabel('Magnitude (dB)')
     plt.grid(True, alpha=0.3)
     plt.legend()
     
+    # Save figure
     try:    
-        fig_path = os.path.join(FIG_PATH, "{}".format('vna_fit_%.4f.png'%ph))
-        print(fig_path)
+        fig_path = os.path.join(FIG_PATH, f'vna_fit_{ph:.4f}.png')
+        print(f"Saving figure to: {fig_path}")
         plt.savefig(fig_path)
     except:
-        fig_path = os.path.join(FIG_PATH, "vna_fit_{}.png".format(ph))
-        print(fig_path)
+        fig_path = os.path.join(FIG_PATH, f"vna_fit_{ph}.png")
+        print(f"Saving figure to: {fig_path}")
         plt.savefig(fig_path)
     
-    s_path = os.path.join(SPATH, "{}".format('vna_fit_%.4f.pkl'%ph))
-    
+    # Save data
+    s_path = os.path.join(SPATH, f'vna_fit_{ph:.4f}.pkl')
     with open(s_path, 'wb') as f:
-        pickle.dump((X, zData, pars, cov), f)
+        pickle.dump((X, zData, f_phi, f_d), f)
     
-    plt.close()
+    # Show the plot if requested
+    if show_plot:
+        plt.show()
+    else:
+        plt.close()
     
-    return f_phi, fd
+    return f_phi, f_d
     
 def turn_on_vna():
     """
