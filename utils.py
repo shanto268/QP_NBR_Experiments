@@ -416,8 +416,8 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     plt.plot(X, mag_db, 'b-', label='S21 Magnitude')
     
     # Plot the identified resonance and drive frequencies
-    plt.axvline(x=f_phi, color='g', linestyle=':', linewidth=2, label=f'f_phi = {f_phi:.6f} GHz')
-    plt.axvline(x=f_d, color='orange', linestyle=':', linewidth=2, label=f'f_d = {f_d:.6f} GHz')
+    plt.axvline(x=f_phi, color='g', linestyle=':', linewidth=2, label=f'f_phi = {f_phi*1e-9:.6f} GHz')
+    plt.axvline(x=f_d, color='orange', linestyle=':', linewidth=2, label=f'f_d = {f_d*1e-9:.6f} GHz')
     
     # Add a smoothed version of the data for clearer visualization
     window_size = min(25, len(mag_db) // 10)  # Adjust window size based on data length
@@ -494,7 +494,8 @@ def set_drive_tone(f, power=16):
     Drive.setValue('Frequency',f*1e9)
     Drive.setValue('Power',power)
     Drive.setValue('Output status',True)
-
+    sleep(0.05)
+    
 def set_clearing_tone(f, power):
     """
     Set the clearing tone to the given frequency.
@@ -505,6 +506,7 @@ def set_clearing_tone(f, power):
     LO.setValue('Frequency',f*1e9)
     LO.setValue('Power',power)
     LO.setValue('Output status',True)
+    sleep(0.05)
 
 def set_project(base_path, sub_dir=None):
     project_path = os.path.join(base_path, time.strftime("%m%d%y"))
@@ -522,13 +524,13 @@ def write_metadata(savefile, acquisitionLength_sec, actualSampleRateMHz, fd, vol
         f.write("Acquisition duration: " + str(acquisitionLength_sec) + " seconds." + '\n')
         f.write("Sample Rate MHz: " + str(actualSampleRateMHz) + '\n')
         f.write("LO frequency: " + str(fd) + " GHz\n")
-        f.write("flux bias: " + str(V) + " mV\n")
         f.write("Temperature: " + str(T) + ' mK\n')
         f.write("Radiator temperature: " + str(T_rad) + ' mK\n')
         f.write("PHI: " + str(ph) + '\n')
         f.write("Voltage: " + str(voltage) + " mV\n")
         f.write("Clearing freq:" + str(clearing_freq) + " GHz\n")
         f.write("Clearing power:" + str(clearing_power) + " dBm\n")
+
 
 def acquire_IQ_data(phi, num_traces=1, acquisitionLength_sec=5, origRateMHz=300, sampleRateMHz=10, averageTimeCycle=0, lowerBound=12, upperBound=40):
     """
@@ -553,17 +555,32 @@ def acquire_IQ_data(phi, num_traces=1, acquisitionLength_sec=5, origRateMHz=300,
 
     for ds in tqdm(np.arange(lowerBound, upperBound+1, 2)):
         DA.setValue('Attenuation', ds)# dB
-        StringForFlux = r'{:3.0f}flux\DA{:2.0f}_SR{:d}MHz'.format(phi * 1000, ds, sampleRateMHz)
-        path = os.path.join(SPATH, "{}".format(StringForFlux))
         
-        os.makedirs(path, exist_ok=True)
+        # Format the flux string properly - ensure no leading or trailing spaces
+        # Use integer for phi value to avoid decimal point issues
+        phi_str = f"{int(phi * 1000):03d}flux"  # 3 digits with leading zeros
+        StringForFlux = f"{phi_str}/DA{int(ds):02d}_SR{int(sampleRateMHz)}MHz"
+        
+        path = os.path.join(SPATH, StringForFlux)
+        print(f"Creating directory: {path}")
+        
+        try:
+            os.makedirs(path, exist_ok=True)
+        except OSError as e:
+            print(f"Error creating directory: {e}")
+            # Try an alternative path if the first one fails
+            alt_path = os.path.join(SPATH, f"phi_{phi:.3f}_DA_{ds}")
+            print(f"Trying alternative path: {alt_path}")
+            os.makedirs(alt_path, exist_ok=True)
+            path = alt_path
         
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        savefile = os.path.join(path, '{}_{}.bin'.format(device_name, timestamp))
+        savefile = os.path.join(path, f"{device_name}_{timestamp}.bin")
         samplesPerPoint = int(max(origRateMHz / sampleRateMHz, 1))
         actualSampleRateMHz = origRateMHz / samplesPerPoint
         
-        Creturn = subprocess.getoutput('"{}" {} {} "{}"'.format(PATH_TO_EXE, int(acquisitionLength_sec), samplesPerPoint, savefile))
+        print(f"Running acquisition command with: {PATH_TO_EXE}, {int(acquisitionLength_sec)}, {samplesPerPoint}, {savefile}")
+        Creturn = subprocess.getoutput(f'"{PATH_TO_EXE}" {int(acquisitionLength_sec)} {samplesPerPoint} "{savefile}"')
         logging.info(Creturn)
         
         with open(savefile[0:-4] + ".txt", 'w') as f:
@@ -576,7 +593,6 @@ def acquire_IQ_data(phi, num_traces=1, acquisitionLength_sec=5, origRateMHz=300,
     logging.info(f'This step took {timeCycle:.6f} seconds.')
     return savefile
 
-    
 def set_TWPA_pump(f=6.04, power=27):
     global TWPA_PUMP
     TWPA_PUMP.setValue('Frequency', f*1e9)
