@@ -298,7 +298,7 @@ def set_vna(f, span=10e6, power=5, avg=25, electrical_delay=82.584e-9):
     sleep(1)
 
 
-def get_vna_trace(f, span=10e6, power=5, avg=25):
+def get_vna_trace(f, span=10e6, power=5, avg=25, show_plot=False):
     """
     Get the VNA trace at the given frequency and span.
     f: frequency to get the VNA trace at in GHz
@@ -314,75 +314,94 @@ def get_vna_trace(f, span=10e6, power=5, avg=25):
     xBG = np.arange(dF['t0'],dF['t0']+dF['shape'][0]*dF['dt'],dF['dt'])
     td = Labber.getTraceDict(zData,x0=xBG[0],x1=xBG[-1])
     lfVNA.addEntry({'VNA - S21':td})
+    if show_plot:
+        plt.figure()
+        plt.plot(zData)
+        plt.show()
     return dF
 
-def fit_vna_trace(f, ph, span=10e6, power=5, avg=25):
+def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     """
-    Fit the VNA trace at the given frequency and span.
-    f: frequency to fit the VNA trace at in GHz
-    span: span of the VNA in MHz
-    power: power to set the VNA to in dBm
-    avg: number of averages to take
+    Fit VNA trace around a given frequency guess to find exact resonance.
+    
+    Parameters:
+    -----------
+    f : float
+        Frequency guess in GHz
+    ph : float
+        Flux bias in phi0
+    span : float, optional
+        Frequency span in Hz
+    power : float, optional
+        VNA power in dBm
+    avg : int, optional
+        Number of averages
+        
+    Returns:
+    --------
+    f_phi : float
+        Resonance frequency in GHz
+    f_d : float
+        Drive frequency in GHz
     """
-    global VNA, FIG_PATH
-    dF = get_vna_trace(f, span, power, avg)
-    xFind = np.arange(dF['t0'],dF['t0']+dF['shape'][0]*dF['dt'],dF['dt'])
-    zData = dF['y']
-    fcInd = np.argmin(zData.real)
-    fguess = xFind[fcInd]
-    X = xFind*1e-9
-
+    global VNA
+    X, zData = get_vna_trace(f, span, power, avg, show_plot)
+    
+    # Find index of frequency closest to the guess frequency
+    fguess_idx = np.abs(X - f).argmin()
+    
+    plt.figure()
     try:
-        logging.warning('Trying to fit a single resonance...')
-        pars,cov = curve_fit(Lor,X,zData.real,p0 = [0.8,X[fguess],0.00025],bounds=([0.2,5.78,0.00005],[2,5.78,0.0005]))
+        logging.info('Trying to fit a double resonance...')
+        pars,cov = curve_fit(sumLor,X,zData.real,p0 = [0.8,0.2,0.5,X[fguess_idx],0,0.00025],bounds=([0.2,0,0.2,min(X),-0.005,0.00005],[2,0.5,1,max(X),0.005,0.0005]))
         plt.plot(X,zData.real,label='data')
-        plt.plot(X,Lor(X,*pars),label='fit')
-        plt.axvline(pars[1])
-        plt.legend()
-        try:
-            resshift = (qp.f_n_phi(ph,0)-qp.f_n_phi(ph,1))
-        except:
-            resshift = 0
-        f0 = pars[1]
-        fd = pars[1] - 1.5e-9*resshift
-        pars[2] = fd
-        plt.axvline(fd)
-        plt.title(f'PHI = {ph:.3f} | shift = {resshift*1e-3:.1f} kHz')
-        plt.ylabel('S21 - real')
-        plt.xlabel('Frequency [GHz]')
-        plt.savefig(FIG_PATH+f'PHI_{ph*1000:3.0f}.png')
-        plt.show()
-        plt.close()
+        plt.plot(X,sumLor(X,*pars),label='fit')
+        plt.plot(X,Lor(X,pars[0],pars[3],pars[5]),label='Lor1')
+        plt.plot(X,Lor(X,pars[1],pars[3]+pars[4],pars[5]),label='Lor2')
+        A1, A2, A3, f1, shift, Gamma = pars
+        logging.info('Fit params: A1 = %.2f, A2 = %.2f, A3 = %.2f, f1 = %.6f, shift = %.6f, Gamma = %.6f'%(A1,A2,A3,f1,shift,Gamma))
         
+        if abs(shift) < 3e-4:
+            f_phi = f1
+            fd = f_phi
+        else:
+            f_phi = f1
+            fd = f1 + shift
+            if fd > f_phi:
+                f_phi, fd = fd, f_phi
     except:
-        logging.warning('Unable to fit resonance. Using the minimum of real part as estimated resonance.')
-        plt.plot(X,zData.real,label='data')
-        pars = np.array([1.5,X[fguess],0.00025])
-        cov = np.ones((len(pars),len(pars)))*np.infty
-        plt.plot(X,Lor(X,*pars),label='unfitted guess')
-        plt.axvline(pars[1])
-        plt.legend()
+        logging.warning('Trying to fit a single resonance...')
         try:
-            resshift = (qp.f_n_phi(ph,0)-qp.f_n_phi(ph,1))
+            pars,cov = curve_fit(Lor,X,zData.real,p0 = [0.8,X[fguess_idx],0.00025],bounds=([0.2,5.78,0.00005],[2,5.78,0.0005]))
+            plt.plot(X,zData.real,label='data')
+            plt.plot(X,Lor(X,*pars),label='fit')
+            A1, f1, Gamma = pars
+            logging.info('Fit params: A1 = %.2f, f1 = %.6f, Gamma = %.6f'%(A1,f1,Gamma))
+            f_phi = f1
+            fd = f_phi
         except:
-            resshift = 0
-        f0 = pars[1]
-        fd = pars[1] - 1.5e-9*resshift
-        pars[2] = fd
-        plt.axvline(fd)
-        plt.title(f'*PHI = {ph:.3f} | shift = {resshift*1e-3:.1f} kHz*')
-        plt.ylabel('S21 - real')
-        plt.xlabel('Frequency [GHz]')
-        plt.savefig(FIG_PATH+f'PHI_{ph*1000:3.0f}.png')
-        plt.show()
-        plt.close()
-        
-    # save a copy of the fit parameters from VNA
-    with open(FIG_PATH+f'PHI_{ph*1000:3.0f}_fit.pkl','wb') as pkfile:
-        pickle.dump([pars,cov],pkfile)
-    logging.info(f'The 0 QP resonance is found at {f0:.6f} GHz.\nWe are driving at {fd:.6f} GHz, which is {(f0-fd)*1e6:.1f} kHz downshifted.')
-
-    return f0, fd
+            logging.warning('Unable to fit resonance. Using the minimum of real part as estimated resonance.')
+            plt.plot(X,zData.real,label='data')
+            pars = np.array([1.5,X[fguess_idx],0.00025])
+            cov = np.ones((len(pars),len(pars)))*np.infty
+            plt.plot(X,Lor(X,*pars),label='unfitted guess')
+            A1, f1, Gamma = pars
+            f_phi = f1
+            fd = f_phi
+    
+    plt.title('Flux Bias: %.4f $\Phi_0$'%ph)
+    plt.xlabel('Frequency (GHz)')
+    plt.ylabel('Re(S21)')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.savefig('figures/vna_fit_%.4f.png'%ph)
+    
+    with open('data/vna_fit_%.4f.pkl'%ph, 'wb') as f:
+        pickle.dump((X, zData, pars, cov), f)
+    
+    plt.close()
+    
+    return f_phi, fd
     
 def turn_on_vna():
     """
@@ -398,11 +417,11 @@ def turn_off_vna():
     global VNA
     VNA.setValue('Output enabled',False)
 
-def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9):
+def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, show_plot=False):
     f_guess = find_mapped_resonance(phi, best_fit)
     print(f"f_guess: {f_guess} GHz")
     set_vna(f_guess, span, power, avg, electrical_delay)
-    f_phi, fd = fit_vna_trace(f_guess, phi)
+    f_phi, fd = fit_vna_trace(f_guess, phi, show_plot=show_plot)
     turn_off_vna()
     return f_phi, fd
 
