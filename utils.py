@@ -19,6 +19,45 @@ from VISAdrivers.continuousAlazar import ADC
 
 from flux_fit import find_mapped_resonance
 
+# Global instrument variables
+VNA = None
+DA = None
+SMU = None
+LO = None
+Drive = None
+vs = None
+lfVNA = None
+
+def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None):
+    """
+    Initialize global instrument variables for use in other functions.
+    
+    Parameters:
+    -----------
+    vna : instrument object
+        Vector Network Analyzer instrument
+    da : instrument object, optional
+        Digital Attenuator instrument
+    smu : instrument object, optional
+        Source Meter Unit instrument
+    lo : instrument object, optional
+        Local Oscillator instrument
+    drive : instrument object, optional
+        Drive Signal Generator instrument
+    srs : instrument object, optional
+        SRS instrument for flux biasing
+    """
+    global VNA, DA, SMU, LO, Drive, vs
+    VNA = vna
+    DA = da
+    SMU = smu
+    LO = lo
+    Drive = drive
+    vs = srs
+    
+def initializeLabberlogging(lfvna):
+    global lfVNA
+    lfVNA = lfvna
 
 def set_project(base_path, sub_dir=None):
     project_path = os.path.join(base_path, time.strftime("%m%d%y"))
@@ -274,7 +313,7 @@ def get_vna_trace(f, span=10e6, power=5, avg=25):
     zData = dF['y']
     xBG = np.arange(dF['t0'],dF['t0']+dF['shape'][0]*dF['dt'],dF['dt'])
     td = Labber.getTraceDict(zData,x0=xBG[0],x1=xBG[-1])
-    lfVNA.addEntry({f'{VNA.name} - S21':td})
+    lfVNA.addEntry({'VNA - S21':td})
     return dF
 
 def fit_vna_trace(f, ph, span=10e6, power=5, avg=25):
