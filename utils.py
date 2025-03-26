@@ -345,27 +345,19 @@ def get_vna_trace(f, span=10e6, power=5, avg=25, show_plot=False):
     # Log data in Labber
     td = Labber.getTraceDict(zData, x0=xBG[0], x1=xBG[-1])
     lfVNA.addEntry({'VNA - S21': td})
-    
-    # Show plot if requested
+        
+    plt.figure(figsize=(10, 6))
+    mag_db = 20 * np.log10(np.abs(zData))
+    plt.plot(xBG, mag_db)
+    plt.xlabel('Frequency (GHz)')
+    plt.ylabel('Log Magnitude (dB)')
+    plt.grid(True, alpha=0.3)
+    plt.title(f'VNA Trace at {f:.6f} GHz')
+    plt.savefig(os.path.join(FIG_PATH, f'vna_trace_{f:.6f}'.replace('.', 'p') + '.png'))
     if show_plot:
-        plt.figure(figsize=(10, 6))
-        
-        # Calculate magnitude in dB
-        mag_db = 20 * np.log10(np.abs(zData))
-        
-        # Plot magnitude
-        plt.plot(xBG, mag_db)
-        
-        # Formatting
-        plt.xlabel('Frequency (GHz)')
-        plt.ylabel('Log Magnitude (dB)')
-        plt.grid(True, alpha=0.3)
-        plt.title(f'VNA Trace at {f:.6f} GHz')
-        
-        # Save and show
-        plt.savefig(os.path.join(FIG_PATH, f'vna_trace_{f:.6f}'.replace('.', 'p') + '.png'))
         plt.show()
-    
+    else:
+        plt.close()
     return xBG, zData
 
 def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
@@ -575,7 +567,7 @@ def write_metadata(savefile, acquisitionLength_sec, actualSampleRateMHz, fd, vol
             
             f.write("--- End Metadata ---\n")
         
-        print(f"Metadata successfully written to {metadata_file}")
+        #print(f"Metadata successfully written to {metadata_file}")
     except Exception as e:
         print(f"Error writing metadata: {e}")
         logging.error(f"Failed to write metadata: {e}")
@@ -632,7 +624,7 @@ def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength
         phi_str = f"phi_{phi:.3f}".replace('.', 'p')
         
         # Create directory structure
-        dir_path = os.path.join(SPATH, phi_str, f"DA_{int(ds):02d}", StringForClearing)
+        dir_path = os.path.join(SPATH, phi_str, f"DA{int(ds):02d}_SR{int(sampleRateMHz)}", StringForClearing)
         
         try:
             os.makedirs(dir_path, exist_ok=True)
