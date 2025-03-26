@@ -232,7 +232,7 @@ def set_flux_bias_srs(voltage, step = 1e-3, lower_bound=-0.6, upper_bound=0.6): 
         vs.config.output = 'on'
         vs.config.voltage_range = 'range10'
     print(f"Output status: {vs.config.output}")
-    print(f"Voltage range: {vs.config.voltage_range}")
+    #print(f"Voltage range: {vs.config.voltage_range}")
     if voltage > upper_bound or voltage < lower_bound:
         raise ValueError('Voltage out of range')
     print(f"Setting FFL bias to {voltage*1e3} mV")
@@ -479,12 +479,20 @@ def turn_off_vna():
 def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, show_plot=False):
     f_guess = find_mapped_resonance(phi, best_fit)
     print(f"f_guess: {f_guess} GHz from the fitted Flux Curve")
+    turn_on_vna()
     set_vna(f_guess, span, power, avg, electrical_delay)
     f_phi, fd = fit_vna_trace(f_guess, phi, show_plot=show_plot)
     turn_off_vna()
     return f_phi, fd
 
-
+def turn_off_drive():
+    """
+    Turn off the drive signal generator.
+    """
+    global Drive
+    Drive.setValue('Output status',False)
+    sleep(0.05)
+    
 def set_drive_tone(f, power=16):
     """
     Set the drive tone to the given frequency.
@@ -532,7 +540,7 @@ def write_metadata(savefile, acquisitionLength_sec, actualSampleRateMHz, fd, vol
         f.write("Clearing power:" + str(clearing_power) + " dBm\n")
 
 
-def acquire_IQ_data(phi, num_traces=1, acquisitionLength_sec=5, origRateMHz=300, sampleRateMHz=10, averageTimeCycle=0, lowerBound=12, upperBound=40):
+def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength_sec=5, origRateMHz=300, sampleRateMHz=10, averageTimeCycle=0, lowerBound=12, upperBound=40):
     """
     Acquires IQ data from the Alazar card.
     phi: flux point to acquire data at
@@ -559,10 +567,11 @@ def acquire_IQ_data(phi, num_traces=1, acquisitionLength_sec=5, origRateMHz=300,
         # Format the flux string properly - ensure no leading or trailing spaces
         # Use integer for phi value to avoid decimal point issues
         phi_str = f"{int(phi * 1000):03d}flux"  # 3 digits with leading zeros
-        StringForFlux = f"{phi_str}/DA{int(ds):02d}_SR{int(sampleRateMHz)}MHz"
+        StringForClearing = f"{f_clearing:.3f}GHz_{P_clearing:.3f}dBm".replace('.', 'p')
+        StringForFlux = f"{phi_str}/DA{int(ds):02d}_SR{int(sampleRateMHz)}MHz/{StringForClearing}"
         
         path = os.path.join(SPATH, StringForFlux)
-        print(f"Creating directory: {path}")
+        #print(f"Creating directory: {path}")
         
         try:
             os.makedirs(path, exist_ok=True)
@@ -579,7 +588,7 @@ def acquire_IQ_data(phi, num_traces=1, acquisitionLength_sec=5, origRateMHz=300,
         samplesPerPoint = int(max(origRateMHz / sampleRateMHz, 1))
         actualSampleRateMHz = origRateMHz / samplesPerPoint
         
-        print(f"Running acquisition command with: {PATH_TO_EXE}, {int(acquisitionLength_sec)}, {samplesPerPoint}, {savefile}")
+        #print(f"Running acquisition command with: {PATH_TO_EXE}, {int(acquisitionLength_sec)}, {samplesPerPoint}, {savefile}")
         Creturn = subprocess.getoutput(f'"{PATH_TO_EXE}" {int(acquisitionLength_sec)} {samplesPerPoint} "{savefile}"')
         logging.info(Creturn)
         
