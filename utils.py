@@ -526,81 +526,160 @@ def set_project(base_path, sub_dir=None):
     return project_path
 
 def write_metadata(savefile, acquisitionLength_sec, actualSampleRateMHz, fd, voltage, T, T_rad, ph, clearing_freq=None, clearing_power=None):
-    """Write metadata to a file."""
-    with open(savefile[0:-4] + ".txt", 'a') as f:
-        f.write("Channels: " + 'AB' + '\n')
-        f.write("Acquisition duration: " + str(acquisitionLength_sec) + " seconds." + '\n')
-        f.write("Sample Rate MHz: " + str(actualSampleRateMHz) + '\n')
-        f.write("LO frequency: " + str(fd) + " GHz\n")
-        f.write("Temperature: " + str(T) + ' mK\n')
-        f.write("Radiator temperature: " + str(T_rad) + ' mK\n')
-        f.write("PHI: " + str(ph) + '\n')
-        f.write("Voltage: " + str(voltage) + " mV\n")
-        f.write("Clearing freq:" + str(clearing_freq) + " GHz\n")
-        f.write("Clearing power:" + str(clearing_power) + " dBm\n")
+    """
+    Write metadata to a file.
+    
+    Parameters:
+    -----------
+    savefile : str
+        Path to the binary file where data is saved
+    acquisitionLength_sec : float
+        Length of the acquisition in seconds
+    actualSampleRateMHz : float
+        Actual sample rate in MHz
+    fd : float
+        Drive frequency in GHz
+    voltage : float
+        Flux bias voltage in V
+    T : float
+        MXC temperature in mK
+    T_rad : float
+        Radiator temperature in mK
+    ph : float
+        Flux bias in phi0
+    clearing_freq : float, optional
+        Clearing tone frequency in GHz
+    clearing_power : float, optional
+        Clearing tone power in dBm
+    """
+    try:
+        metadata_file = savefile[0:-4] + ".txt"
+        print(f"Writing metadata to: {metadata_file}")
+        
+        # Open the file in append mode to add metadata
+        with open(metadata_file, 'a') as f:
+            f.write(f"\n--- Experiment Metadata ---\n")
+            f.write(f"Channels: AB\n")
+            f.write(f"Acquisition duration: {acquisitionLength_sec} seconds\n")
+            f.write(f"Sample Rate: {actualSampleRateMHz} MHz\n")
+            f.write(f"Drive frequency: {fd*1e-9:.6f} GHz\n")
+            f.write(f"Temperature MXC: {T} mK\n")
+            f.write(f"Radiator temperature: {T_rad} mK\n")
+            f.write(f"Flux bias (Phi): {ph:.6f} Phi0\n")
+            f.write(f"Flux voltage: {voltage:.6f} V\n")
+            
+            if clearing_freq is not None:
+                f.write(f"Clearing frequency: {clearing_freq:.6f} GHz\n")
+            if clearing_power is not None:
+                f.write(f"Clearing power: {clearing_power:.6f} dBm\n")
+            
+            f.write("--- End Metadata ---\n")
+        
+        print(f"Metadata successfully written to {metadata_file}")
+    except Exception as e:
+        print(f"Error writing metadata: {e}")
+        logging.error(f"Failed to write metadata: {e}")
 
 
 def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength_sec=5, origRateMHz=300, sampleRateMHz=10, averageTimeCycle=0, lowerBound=12, upperBound=40):
     """
     Acquires IQ data from the Alazar card.
-    phi: flux point to acquire data at
-    f_drive: drive tone frequency in GHz
-    num_traces: number of traces to acquire
-    acquisitionLength_sec: length of the acquisition in seconds
-    origRateMHz: original sample rate of the Alazar card in MHz
-    sampleRateMHz: sample rate to acquire data at in MHz
-    T: temperature of the resonator in mK
-    averageTimeCycle: number of averages to take
-    lowerBound: lower bound of the DA attenuator in dB
-    upperBound: upper bound of the DA attenuator in dB
+    
+    Parameters:
+    -----------
+    phi : float
+        Flux point to acquire data at in phi0
+    f_clearing : float
+        Clearing tone frequency in GHz
+    P_clearing : float
+        Clearing tone power in dBm
+    num_traces : int, optional
+        Number of traces to acquire
+    acquisitionLength_sec : float, optional
+        Length of the acquisition in seconds
+    origRateMHz : float, optional
+        Original sample rate of the Alazar card in MHz
+    sampleRateMHz : float, optional
+        Sample rate to acquire data at in MHz
+    averageTimeCycle : int, optional
+        Number of averages to take
+    lowerBound : int, optional
+        Lower bound of the DA attenuator in dB
+    upperBound : int, optional
+        Upper bound of the DA attenuator in dB
+        
+    Returns:
+    --------
+    savefile : str
+        Path to the last saved binary file
     """
     global SPATH, DA, PATH_TO_EXE, device_name
+    
+    last_savefile = None  # To store the path of the last saved file
 
     adc = ADC()
     adc.configureClock(MS_s = origRateMHz)
     adc.configureTrigger(source='EXT')
     now = perf_counter()
 
+    # Create a safe directory name for the clearing tone parameters
+    StringForClearing = f"clearing_{f_clearing:.2f}GHz_{P_clearing:.1f}dBm".replace('.', 'p')
+
     for ds in tqdm(np.arange(lowerBound, upperBound+1, 2)):
-        DA.setValue('Attenuation', ds)# dB
+        DA.setValue('Attenuation', ds)  # dB
         
         # Format the flux string properly - ensure no leading or trailing spaces
-        # Use integer for phi value to avoid decimal point issues
-        phi_str = f"{int(phi * 1000):03d}flux"  # 3 digits with leading zeros
-        StringForClearing = f"{f_clearing:.3f}GHz_{P_clearing:.3f}dBm".replace('.', 'p')
-        StringForFlux = f"{phi_str}/DA{int(ds):02d}_SR{int(sampleRateMHz)}MHz/{StringForClearing}"
+        phi_str = f"phi_{phi:.3f}".replace('.', 'p')
         
-        path = os.path.join(SPATH, StringForFlux)
-        #print(f"Creating directory: {path}")
+        # Create directory structure
+        dir_path = os.path.join(SPATH, phi_str, f"DA_{int(ds):02d}", StringForClearing)
         
         try:
-            os.makedirs(path, exist_ok=True)
+            os.makedirs(dir_path, exist_ok=True)
+            logging.info(f"Created directory: {dir_path}")
         except OSError as e:
-            print(f"Error creating directory: {e}")
+            logging.error(f"Error creating directory: {e}")
             # Try an alternative path if the first one fails
             alt_path = os.path.join(SPATH, f"phi_{phi:.3f}_DA_{ds}")
-            print(f"Trying alternative path: {alt_path}")
+            logging.info(f"Trying alternative path: {alt_path}")
             os.makedirs(alt_path, exist_ok=True)
-            path = alt_path
+            dir_path = alt_path
         
+        # Create timestamp and filename
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        savefile = os.path.join(path, f"{device_name}_{timestamp}.bin")
+        savefile = os.path.join(dir_path, f"{device_name}_{timestamp}.bin")
+        last_savefile = savefile  # Store the path for returning
+        
+        # Calculate actual sample rate
         samplesPerPoint = int(max(origRateMHz / sampleRateMHz, 1))
         actualSampleRateMHz = origRateMHz / samplesPerPoint
         
-        #print(f"Running acquisition command with: {PATH_TO_EXE}, {int(acquisitionLength_sec)}, {samplesPerPoint}, {savefile}")
-        Creturn = subprocess.getoutput(f'"{PATH_TO_EXE}" {int(acquisitionLength_sec)} {samplesPerPoint} "{savefile}"')
-        logging.info(Creturn)
+        # Run the acquisition
+        logging.info(f"Running acquisition with {samplesPerPoint} samples per point")
+        try:
+            Creturn = subprocess.getoutput(f'"{PATH_TO_EXE}" {int(acquisitionLength_sec)} {samplesPerPoint} "{savefile}"')
+            logging.info(f"Acquisition result: {Creturn}")
+        except Exception as e:
+            logging.error(f"Error during acquisition: {e}")
         
+        # Write basic info to the metadata file
         with open(savefile[0:-4] + ".txt", 'w') as f:
-            f.write(time.strftime("%c") + '\n')
-            f.write(f"DA power: {DA.getValue('Attenuation')} dB\n")
-
+            f.write(f"--- Basic Info ---\n")
+            f.write(f"Timestamp: {time.strftime('%c')}\n")
+            f.write(f"Digital Attenuator: {DA.getValue('Attenuation')} dB\n")
+            f.write(f"Sample rate: {actualSampleRateMHz} MHz\n")
+            f.write(f"Acquisition length: {acquisitionLength_sec} seconds\n")
+            f.write(f"Phi: {phi:.6f}\n")
+            f.write(f"Clearing frequency: {f_clearing:.6f} GHz\n")
+            f.write(f"Clearing power: {P_clearing:.6f} dBm\n")
+            f.write(f"--- End Basic Info ---\n\n")
+        
         sleep(0.05)
 
     timeCycle = perf_counter() - now
-    logging.info(f'This step took {timeCycle:.6f} seconds.')
-    return savefile
+    logging.info(f'Acquisition completed in {timeCycle:.6f} seconds.')
+    
+    return last_savefile
 
 def set_TWPA_pump(f=6.04, power=27):
     global TWPA_PUMP
