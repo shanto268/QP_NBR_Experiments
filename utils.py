@@ -2,8 +2,9 @@ import logging
 import os
 import pickle
 import struct
+import subprocess
 import time
-from time import sleep, strftime
+from time import perf_counter, sleep, strftime
 
 import fitTools.quasiparticleFunctions as qp
 import h5py
@@ -27,6 +28,10 @@ LO = None
 Drive = None
 vs = None
 lfVNA = None
+FIG_PATH = None
+PATH_TO_EXE = None
+SPATH = None
+device_name = None
 
 def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None):
     """
@@ -58,6 +63,14 @@ def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None
 def initializeLabberlogging(lfvna):
     global lfVNA
     lfVNA = lfvna
+
+def initialize_logging(lfvna, spath, path_to_exe, fig_path, d_name):
+    global SPATH, PATH_TO_EXE, FIG_PATH, device_name
+    SPATH = spath
+    PATH_TO_EXE = path_to_exe
+    device_name = d_name
+    FIG_PATH = fig_path
+    initializeLabberlogging(lfvna)
 
 def set_project(base_path, sub_dir=None):
     project_path = os.path.join(base_path, time.strftime("%m%d%y"))
@@ -291,12 +304,11 @@ def set_vna(f, span=10e6, power=5, avg=25, electrical_delay=82.584e-9):
     VNA.setValue('Range type','Center - Span')
     VNA.setValue('Center frequency', f*1e9)
     VNA.setValue('Electrical Delay',electrical_delay)
-    VNA.setValue('Span',span*1e6)
+    VNA.setValue('Span',span)
     VNA.setValue('Output enabled',True)
     VNA.setValue('Output power',power)
     VNA.setValue('# of averages',avg)
     sleep(1)
-
 
 def get_vna_trace(f, span=10e6, power=5, avg=25, show_plot=False):
     """
@@ -305,8 +317,15 @@ def get_vna_trace(f, span=10e6, power=5, avg=25, show_plot=False):
     span: span of the VNA in MHz
     power: power to set the VNA to in dBm
     avg: number of averages to take
+    
+    Returns:
+    --------
+    xBG : numpy array
+        Frequency array in GHz
+    zData : numpy array
+        Complex S21 data
     """
-    global VNA, lfVNA
+    global VNA, lfVNA, FIG_PATH
     set_vna(f, span, power, avg)
     VNA.setValue('Trigger',True)
     dF = VNA.getValue('S21')
@@ -316,9 +335,14 @@ def get_vna_trace(f, span=10e6, power=5, avg=25, show_plot=False):
     lfVNA.addEntry({'VNA - S21':td})
     if show_plot:
         plt.figure()
-        plt.plot(zData)
+        plt.plot(xBG, 20 * np.log10(np.abs(zData)))
+        plt.xlabel('Frequency (GHz)')
+        plt.ylabel('Log Magnitude (dB)')
+        plt.grid(True, alpha=0.3)
+        plt.title(f'VNA Trace at {f} GHz')
+        plt.savefig(os.path.join(FIG_PATH, f'vna_trace_{f:.4f}'.replace('.', 'p') + '.png'))
         plt.show()
-    return dF
+    return xBG, zData
 
 def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     """
@@ -344,7 +368,7 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     f_d : float
         Drive frequency in GHz
     """
-    global VNA
+    global VNA, FIG_PATH, SPATH
     X, zData = get_vna_trace(f, span, power, avg, show_plot)
     
     # Find index of frequency closest to the guess frequency
@@ -394,9 +418,19 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     plt.ylabel('Re(S21)')
     plt.grid(True, alpha=0.3)
     plt.legend()
-    plt.savefig('figures/vna_fit_%.4f.png'%ph)
     
-    with open('data/vna_fit_%.4f.pkl'%ph, 'wb') as f:
+    try:    
+        fig_path = os.path.join(FIG_PATH, "{}".format('vna_fit_%.4f.png'%ph))
+        print(fig_path)
+        plt.savefig(fig_path)
+    except:
+        fig_path = os.path.join(FIG_PATH, "vna_fit_{}.png".format(ph))
+        print(fig_path)
+        plt.savefig(fig_path)
+    
+    s_path = os.path.join(SPATH, "{}".format('vna_fit_%.4f.pkl'%ph))
+    
+    with open(s_path, 'wb') as f:
         pickle.dump((X, zData, pars, cov), f)
     
     plt.close()
@@ -419,7 +453,7 @@ def turn_off_vna():
 
 def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, show_plot=False):
     f_guess = find_mapped_resonance(phi, best_fit)
-    print(f"f_guess: {f_guess} GHz")
+    print(f"f_guess: {f_guess} GHz from the fitted Flux Curve")
     set_vna(f_guess, span, power, avg, electrical_delay)
     f_phi, fd = fit_vna_trace(f_guess, phi, show_plot=show_plot)
     turn_off_vna()
