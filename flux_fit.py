@@ -61,7 +61,7 @@ def flux_quanta_to_frequency(flux_quanta, best_params):
     frequency = w0 * (1 + q0 * numerator / safe_denominator) ** exponent
     return frequency
 
-def phi_to_voltage(phi, best_params):
+def phi_to_voltage(phi, best_params, unit='mV'):
     """
     Converts normalized flux quanta (phi) to voltage using the fitted parameters.
 
@@ -84,6 +84,12 @@ def phi_to_voltage(phi, best_params):
     V_period = best_params['V_period']
 
     voltage = phi * V_period + V_offset
+    if unit == 'V':
+        voltage = voltage * 1e-4
+    elif unit == 'mV':
+        voltage = voltage
+    else:
+        raise ValueError("Invalid unit. Please use 'mV' or 'V'.")
     return voltage
 
 def from_flux_fit(phi_arr, best_fit):
@@ -114,7 +120,7 @@ def plot_sweep_points(v_arr, f_arr, phi_arr):
     plt.figure(figsize=(10, 5))
     plt.subplot(1, 2, 1)
     plt.plot(v_arr, f_arr, ".")
-    plt.xlabel("Voltage (V)")
+    plt.xlabel("Voltage (mV)")
     plt.ylabel("Frequency (GHz)")
     plt.title("Flux Points to be swept")
 

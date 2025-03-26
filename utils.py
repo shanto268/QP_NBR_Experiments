@@ -1,11 +1,23 @@
+import logging
 import os
+import pickle
 import struct
 import time
-from time import strftime
+from time import sleep, strftime
 
+import fitTools.quasiparticleFunctions as qp
 import h5py
+import Labber
+import matplotlib.pyplot as plt
 import numpy as np
+from fitTools.utilities import Watt2dBm, dBm2Watt
 from pandas import DataFrame
+from scipy.optimize import curve_fit
+from srsinst.dc205 import DC205
+from tqdm import tqdm
+from VISAdrivers.continuousAlazar import ADC
+
+from flux_fit import find_mapped_resonance
 
 
 def set_project(base_path, sub_dir=None):
@@ -154,6 +166,13 @@ def turn_on_SRS(vs):
     vs.config.output = 'on'
 
 def set_flux_bias_srs(voltage, step = 1e-3, lower_bound=-0.6, upper_bound=0.6): # voltage in V
+    """
+    Set the flux bias using the SRS电源.
+    voltage: voltage to set the flux bias to in V
+    step: step size in V
+    lower_bound: lower bound of the voltage in V
+    upper_bound: upper bound of the voltage in V
+    """
     global vs
     if vs.config.output == 'off':
         vs.config.output = 'on'
@@ -221,7 +240,7 @@ def sumLor(f,A1,A2,A3,f1,shift,Gamma):
 def Lor(f,A1,f1,Gamma):
     return 1 - A1/(1+(2*(f-f1)/Gamma)**2)
 
-def set_vna(f, span=10e6, power=5, avg=25):
+def set_vna(f, span=10e6, power=5, avg=25, electrical_delay=82.584e-9):
     """
     Set the VNA to the given frequency and span, and return the center frequency of the resonance.
     f: frequency to set the VNA to in GHz
@@ -231,8 +250,9 @@ def set_vna(f, span=10e6, power=5, avg=25):
     """
     global VNA
     VNA.setValue('Range type','Center - Span')
-    VNA.setValue('Center frequency', f)
-    VNA.setValue('Span',span)
+    VNA.setValue('Center frequency', f*1e9)
+    VNA.setValue('Electrical Delay',electrical_delay)
+    VNA.setValue('Span',span*1e6)
     VNA.setValue('Output enabled',True)
     VNA.setValue('Output power',power)
     VNA.setValue('# of averages',avg)
@@ -247,10 +267,14 @@ def get_vna_trace(f, span=10e6, power=5, avg=25):
     power: power to set the VNA to in dBm
     avg: number of averages to take
     """
-    global VNA
+    global VNA, lfVNA
     set_vna(f, span, power, avg)
     VNA.setValue('Trigger',True)
     dF = VNA.getValue('S21')
+    zData = dF['y']
+    xBG = np.arange(dF['t0'],dF['t0']+dF['shape'][0]*dF['dt'],dF['dt'])
+    td = Labber.getTraceDict(zData,x0=xBG[0],x1=xBG[-1])
+    lfVNA.addEntry({f'{VNA.name} - S21':td})
     return dF
 
 def fit_vna_trace(f, ph, span=10e6, power=5, avg=25):
@@ -261,7 +285,7 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25):
     power: power to set the VNA to in dBm
     avg: number of averages to take
     """
-    global VNA, figpath
+    global VNA, FIG_PATH
     dF = get_vna_trace(f, span, power, avg)
     xFind = np.arange(dF['t0'],dF['t0']+dF['shape'][0]*dF['dt'],dF['dt'])
     zData = dF['y']
@@ -287,7 +311,7 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25):
         plt.title(f'PHI = {ph:.3f} | shift = {resshift*1e-3:.1f} kHz')
         plt.ylabel('S21 - real')
         plt.xlabel('Frequency [GHz]')
-        plt.savefig(figpath+f'PHI_{ph*1000:3.0f}.png')
+        plt.savefig(FIG_PATH+f'PHI_{ph*1000:3.0f}.png')
         plt.show()
         plt.close()
         
@@ -310,12 +334,12 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25):
         plt.title(f'*PHI = {ph:.3f} | shift = {resshift*1e-3:.1f} kHz*')
         plt.ylabel('S21 - real')
         plt.xlabel('Frequency [GHz]')
-        plt.savefig(figpath+f'PHI_{ph*1000:3.0f}.png')
+        plt.savefig(FIG_PATH+f'PHI_{ph*1000:3.0f}.png')
         plt.show()
         plt.close()
         
     # save a copy of the fit parameters from VNA
-    with open(figpath+f'PHI_{ph*1000:3.0f}_fit.pkl','wb') as pkfile:
+    with open(FIG_PATH+f'PHI_{ph*1000:3.0f}_fit.pkl','wb') as pkfile:
         pickle.dump([pars,cov],pkfile)
     logging.info(f'The 0 QP resonance is found at {f0:.6f} GHz.\nWe are driving at {fd:.6f} GHz, which is {(f0-fd)*1e6:.1f} kHz downshifted.')
 
@@ -335,12 +359,14 @@ def turn_off_vna():
     global VNA
     VNA.setValue('Output enabled',False)
 
-def find_resonance(phi, span, best_fit):
+def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9):
     f_guess = find_mapped_resonance(phi, best_fit)
-    set_vna(f_guess, span)
+    print(f"f_guess: {f_guess} GHz")
+    set_vna(f_guess, span, power, avg, electrical_delay)
     f_phi, fd = fit_vna_trace(f_guess, phi)
     turn_off_vna()
     return f_phi, fd
+
 
 def set_drive_tone(f, power=16):
     """
