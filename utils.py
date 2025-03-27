@@ -518,7 +518,7 @@ def set_clearing_tone(f, power):
     Drive.setValue('Frequency',f*1e9)
     Drive.setValue('Power',power)
     Drive.setValue('Output status',True)
-    print(f"Clearing tone set to {Drive.getValue('Frequency')} GHz with power {Drive.getValue('Power')} dBm")
+    print(f"Clearing tone set to {Drive.getValue('Frequency')} Hz with power {Drive.getValue('Power')} dBm")
     sleep(0.05)
 
 def set_project(base_path, sub_dir=None):
@@ -669,7 +669,6 @@ def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength
         
         # Write basic info to the metadata file
         with open(savefile[0:-4] + ".txt", 'w') as f:
-            f.write(f"--- Basic Info ---\n")
             f.write(f"Timestamp: {time.strftime('%c')}\n")
             f.write(f"Digital Attenuator: {DA.getValue('Attenuation')} dB\n")
             f.write(f"Sample rate: {actualSampleRateMHz} MHz\n")
@@ -677,7 +676,6 @@ def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength
             f.write(f"Phi: {phi:.6f}\n")
             f.write(f"Clearing frequency: {f_clearing:.6f} GHz\n")
             f.write(f"Clearing power: {P_clearing:.6f} dBm\n")
-            f.write(f"--- End Basic Info ---\n\n")
         
         sleep(0.05)
 
