@@ -499,10 +499,10 @@ def turn_off_LO():
 def set_LO_tone(f, power=16):
     """
     Set the drive tone to the given frequency.
-    f: frequency to set the drive tone to in GHz
+    f: frequency to set the drive tone to in Hz
     """
     global LO
-    LO.setValue('Frequency',f*1e9)
+    LO.setValue('Frequency',f)
     LO.setValue('Power',power)
     LO.setValue('Output status',True)
     print(f"LO tone set to {LO.getValue('Frequency')} GHz")
