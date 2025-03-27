@@ -460,7 +460,7 @@ def fit_vna_trace(f, ph, detuning=0, span=10e6, power=5, avg=25, show_plot=False
     else:
         plt.close()
     
-    return f_phi
+    return f_phi, f_d
     
 def turn_on_vna():
     """
