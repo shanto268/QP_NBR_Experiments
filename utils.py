@@ -529,49 +529,30 @@ def set_project(base_path, sub_dir=None):
     print(f"Project path set to: {project_path}")
     return project_path
 
-def write_metadata(savefile, acquisitionLength_sec, actualSampleRateMHz, fd, voltage, T, T_rad, ph, clearing_freq=None, clearing_power=None):
+def write_metadata(metadata_file, acquisitionLength_sec, actualSampleRateMHz, fd, voltage, T, T_rad, ph, clearing_freq=None, clearing_power=None):
     """Write metadata to a file."""
-    try:
-        metadata_file = savefile[0:-4] + ".txt"
+    # Now write everything in one go
+    with open(metadata_file, 'a') as f:
+        # Add a separator
+        f.write("\n" + "="*50 + "\n")
         
-        # First read the existing basic info
-        basic_info = ""
-        try:
-            with open(metadata_file, 'r') as f:
-                basic_info = f.read()
-        except:
-            basic_info = "No basic info found\n"
+        # Write the experiment metadata
+        f.write("=== Experiment Metadata ===\n")
+        f.write(f"Channels: AB\n")
+        f.write(f"Acquisition duration: {acquisitionLength_sec} seconds\n")
+        f.write(f"Sample Rate: {actualSampleRateMHz} MHz\n")
+        f.write(f"Drive frequency: {fd*1e-9:.6f} GHz\n")
+        f.write(f"Temperature MXC: {T} mK\n")
+        f.write(f"Radiator temperature: {T_rad} mK\n")
+        f.write(f"Flux bias (Phi): {ph:.6f} Phi0\n")
+        f.write(f"Flux voltage: {voltage*1e3:.6f} mV\n")
         
-        # Now write everything in one go
-        with open(metadata_file, 'w') as f:
-            # Write the original basic info
-            f.write(basic_info)
-            
-            # Add a separator
-            f.write("\n" + "="*50 + "\n")
-            
-            # Write the experiment metadata
-            f.write("=== Experiment Metadata ===\n")
-            f.write(f"Channels: AB\n")
-            f.write(f"Acquisition duration: {acquisitionLength_sec} seconds\n")
-            f.write(f"Sample Rate: {actualSampleRateMHz} MHz\n")
-            f.write(f"Drive frequency: {fd*1e-9:.6f} GHz\n")
-            f.write(f"Temperature MXC: {T} mK\n")
-            f.write(f"Radiator temperature: {T_rad} mK\n")
-            f.write(f"Flux bias (Phi): {ph:.6f} Phi0\n")
-            f.write(f"Flux voltage: {voltage*1e3:.6f} mV\n")
-            
-            if clearing_freq is not None:
-                f.write(f"Clearing frequency: {clearing_freq:.6f} GHz\n")
-            if clearing_power is not None:
-                f.write(f"Clearing power: {clearing_power:.6f} dBm\n")
-            
-            f.write("=== End Experiment Metadata ===\n")
-            
-    except Exception as e:
-        print(f"Error writing metadata: {e}")
-        logging.error(f"Failed to write metadata: {e}")
-
+        if clearing_freq is not None:
+            f.write(f"Clearing frequency: {clearing_freq:.6f} GHz\n")
+        if clearing_power is not None:
+            f.write(f"Clearing power: {clearing_power:.6f} dBm\n")
+        
+        f.write("=== End Experiment Metadata ===\n")
 
 def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength_sec=5, origRateMHz=300, sampleRateMHz=10, averageTimeCycle=0, lowerBound=12, upperBound=40):
     """
@@ -667,7 +648,8 @@ def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength
     timeCycle = perf_counter() - now
     logging.info(f'Acquisition completed in {timeCycle:.6f} seconds.')
     
-    return last_savefile
+    metatadata_file = savefile[0:-4] + ".txt"
+    return metatadata_file
 
 def set_TWPA_pump(f=6.04, power=27):
     global TWPA_PUMP
