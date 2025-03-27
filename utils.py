@@ -308,9 +308,18 @@ def set_vna(f, span=10e6, power=5, avg=25, electrical_delay=82.584e-9):
     VNA.setValue('Electrical Delay',electrical_delay)
     VNA.setValue('Span',span)
     VNA.setValue('Output enabled',True)
-    VNA.setValue('Output power',power)
+    VNA.setValue('Average',True)
+    VNA.setValue('Wait for new trace', True)
     VNA.setValue('# of averages',avg)
-    sleep(1)
+    sleep(0.5)
+
+def turn_off_clearing():
+    """
+    Turn off the clearing tone generator.
+    """
+    global Drive
+    Drive.setValue('Output status',False)
+    sleep(0.05)
 
 def get_vna_trace(f, span=10e6, power=5, avg=25, show_plot=False):
     """
@@ -460,6 +469,7 @@ def turn_on_vna():
     """
     global VNA
     VNA.setValue('Output enabled',True)
+    sleep(0.05)
     
 def turn_off_vna():
     """
@@ -467,6 +477,7 @@ def turn_off_vna():
     """
     global VNA
     VNA.setValue('Output enabled',False)
+    sleep(0.05)
 
 def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, show_plot=False):
     f_guess = find_mapped_resonance(phi, best_fit)
@@ -477,23 +488,24 @@ def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584
     turn_off_vna()
     return f_phi, fd
 
-def turn_off_drive():
+def turn_off_LO():
     """
     Turn off the drive signal generator.
     """
-    global Drive
-    Drive.setValue('Output status',False)
+    global LO
+    LO.setValue('Output status',False)
     sleep(0.05)
     
-def set_drive_tone(f, power=16):
+def set_LO_tone(f, power=16):
     """
     Set the drive tone to the given frequency.
     f: frequency to set the drive tone to in GHz
     """
-    global Drive
-    Drive.setValue('Frequency',f*1e9)
-    Drive.setValue('Power',power)
-    Drive.setValue('Output status',True)
+    global LO
+    LO.setValue('Frequency',f*1e9)
+    LO.setValue('Power',power)
+    LO.setValue('Output status',True)
+    print(f"LO tone set to {LO.getValue('Frequency')} GHz")
     sleep(0.05)
     
 def set_clearing_tone(f, power):
@@ -502,10 +514,11 @@ def set_clearing_tone(f, power):
     f: frequency to set the clearing tone to in GHz
     power: power to set the clearing tone to in dBm
     """
-    global LO
-    LO.setValue('Frequency',f*1e9)
-    LO.setValue('Power',power)
-    LO.setValue('Output status',True)
+    global Drive
+    Drive.setValue('Frequency',f*1e9)
+    Drive.setValue('Power',power)
+    Drive.setValue('Output status',True)
+    print(f"Clearing tone set to {Drive.getValue('Frequency')} GHz with power {Drive.getValue('Power')} dBm")
     sleep(0.05)
 
 def set_project(base_path, sub_dir=None):
