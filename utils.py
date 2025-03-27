@@ -231,13 +231,12 @@ def set_flux_bias_srs(voltage, step = 1e-3, lower_bound=-0.6, upper_bound=0.6): 
     if vs.config.output == 'off':
         vs.config.output = 'on'
         vs.config.voltage_range = 'range10'
-    print(f"Output status: {vs.config.output}")
+    # print(f"Output status: {vs.config.output}")
     #print(f"Voltage range: {vs.config.voltage_range}")
     if voltage > upper_bound or voltage < lower_bound:
         raise ValueError('Voltage out of range')
-    print(f"Setting FFL bias to {voltage*1e3} mV")
     start_voltage = vs.setting.voltage
-    print(f"Starting voltage: {start_voltage} V")
+    print(f"Setting FFL bias to {voltage*1e3} mV from {start_voltage*1e3} mV")
     if voltage <= start_voltage:
         step = -step
     voltage_list = np.round(np.arange(start_voltage, voltage + step/2, step), 7)
@@ -369,7 +368,7 @@ def get_vna_trace(f, span=10e6, power=5, avg=25, show_plot=False):
         plt.close()
     return xBG, zData
 
-def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
+def fit_vna_trace(f, ph, detuning=0, span=10e6, power=5, avg=25, show_plot=False):
     """
     Find resonance by identifying the minimum of VNA magnitude data.
     
@@ -406,7 +405,7 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     f_phi = X[min_idx]
     
     # For now, set f_d the same as f_phi
-    f_d = f_phi
+    f_d = f_phi - detuning
     
     logging.info(f'Resonance found at f_phi = {f_phi:.6f} GHz')
     
@@ -443,11 +442,11 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     # Save figure
     try:    
         fig_path = os.path.join(FIG_PATH, f'vna_fit_{ph:.4f}.png')
-        print(f"Saving figure to: {fig_path}")
+        # print(f"Saving figure to: {fig_path}")
         plt.savefig(fig_path)
     except:
         fig_path = os.path.join(FIG_PATH, f"vna_fit_{ph}.png")
-        print(f"Saving figure to: {fig_path}")
+        # print(f"Saving figure to: {fig_path}")
         plt.savefig(fig_path)
     
     # Save data
@@ -461,7 +460,7 @@ def fit_vna_trace(f, ph, span=10e6, power=5, avg=25, show_plot=False):
     else:
         plt.close()
     
-    return f_phi, f_d
+    return f_phi
     
 def turn_on_vna():
     """
@@ -479,14 +478,14 @@ def turn_off_vna():
     VNA.setValue('Output enabled',False)
     sleep(0.05)
 
-def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, show_plot=False):
+def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, detuning=0, show_plot=False):
     f_guess = find_mapped_resonance(phi, best_fit)
     print(f"f_guess: {f_guess} GHz from the fitted Flux Curve")
     turn_on_vna()
     set_vna(f_guess, span, power, avg, electrical_delay)
-    f_phi, fd = fit_vna_trace(f_guess, phi, show_plot=show_plot)
+    f_phi, f_d = fit_vna_trace(f_guess, phi, detuning, show_plot=show_plot)
     turn_off_vna()
-    return f_phi, fd
+    return f_phi, f_d
 
 def turn_off_LO():
     """
@@ -505,7 +504,7 @@ def set_LO_tone(f, power=16):
     LO.setValue('Frequency',f)
     LO.setValue('Power',power)
     LO.setValue('Output status',True)
-    print(f"LO tone set to {LO.getValue('Frequency')} GHz")
+    print(f"LO tone set to {LO.getValue('Frequency')*1e-9:.6f} GHz")
     sleep(0.05)
     
 def set_clearing_tone(f, power):
@@ -518,7 +517,7 @@ def set_clearing_tone(f, power):
     Drive.setValue('Frequency',f*1e9)
     Drive.setValue('Power',power)
     Drive.setValue('Output status',True)
-    print(f"Clearing tone set to {Drive.getValue('Frequency')} Hz with power {Drive.getValue('Power')} dBm")
+    print(f"Clearing tone set to {Drive.getValue('Frequency')*1e-9:.6f} GHz with power {Drive.getValue('Power')} dBm")
     sleep(0.05)
 
 def set_project(base_path, sub_dir=None):
