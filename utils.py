@@ -531,39 +531,28 @@ def set_project(base_path, sub_dir=None):
     return project_path
 
 def write_metadata(savefile, acquisitionLength_sec, actualSampleRateMHz, fd, voltage, T, T_rad, ph, clearing_freq=None, clearing_power=None):
-    """
-    Write metadata to a file.
-    
-    Parameters:
-    -----------
-    savefile : str
-        Path to the binary file where data is saved
-    acquisitionLength_sec : float
-        Length of the acquisition in seconds
-    actualSampleRateMHz : float
-        Actual sample rate in MHz
-    fd : float
-        Drive frequency in GHz
-    voltage : float
-        Flux bias voltage in V
-    T : float
-        MXC temperature in mK
-    T_rad : float
-        Radiator temperature in mK
-    ph : float
-        Flux bias in phi0
-    clearing_freq : float, optional
-        Clearing tone frequency in GHz
-    clearing_power : float, optional
-        Clearing tone power in dBm
-    """
+    """Write metadata to a file."""
     try:
         metadata_file = savefile[0:-4] + ".txt"
-        #print(f"Writing metadata to: {metadata_file}")
         
-        # Open the file in append mode to add metadata
-        with open(metadata_file, 'a') as f:
-            f.write(f"\n--- Experiment Metadata ---\n")
+        # First read the existing basic info
+        basic_info = ""
+        try:
+            with open(metadata_file, 'r') as f:
+                basic_info = f.read()
+        except:
+            basic_info = "No basic info found\n"
+        
+        # Now write everything in one go
+        with open(metadata_file, 'w') as f:
+            # Write the original basic info
+            f.write(basic_info)
+            
+            # Add a separator
+            f.write("\n" + "="*50 + "\n")
+            
+            # Write the experiment metadata
+            f.write("=== Experiment Metadata ===\n")
             f.write(f"Channels: AB\n")
             f.write(f"Acquisition duration: {acquisitionLength_sec} seconds\n")
             f.write(f"Sample Rate: {actualSampleRateMHz} MHz\n")
@@ -571,16 +560,15 @@ def write_metadata(savefile, acquisitionLength_sec, actualSampleRateMHz, fd, vol
             f.write(f"Temperature MXC: {T} mK\n")
             f.write(f"Radiator temperature: {T_rad} mK\n")
             f.write(f"Flux bias (Phi): {ph:.6f} Phi0\n")
-            f.write(f"Flux voltage: {voltage:.6f} V\n")
+            f.write(f"Flux voltage: {voltage*1e3:.6f} mV\n")
             
             if clearing_freq is not None:
                 f.write(f"Clearing frequency: {clearing_freq:.6f} GHz\n")
             if clearing_power is not None:
                 f.write(f"Clearing power: {clearing_power:.6f} dBm\n")
             
-            f.write("--- End Metadata ---\n")
-        
-        #print(f"Metadata successfully written to {metadata_file}")
+            f.write("=== End Experiment Metadata ===\n")
+            
     except Exception as e:
         print(f"Error writing metadata: {e}")
         logging.error(f"Failed to write metadata: {e}")
@@ -620,7 +608,7 @@ def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength
     """
     global SPATH, DA, PATH_TO_EXE, device_name
     
-    last_savefile = None  # To store the path of the last saved file
+    last_savefile = None
 
     adc = ADC()
     adc.configureClock(MS_s = origRateMHz)
@@ -633,28 +621,24 @@ def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength
     for ds in tqdm(np.arange(lowerBound, upperBound+1, 2)):
         DA.setValue('Attenuation', ds)  # dB
         
-        # Format the flux string properly - ensure no leading or trailing spaces
-        phi_str = f"phi_{phi:.3f}".replace('.', 'p')
+        # Format the phi string properly - ensure no leading or trailing spaces
+        phi_str = f"phi_{phi:.3f}".replace('.', 'p').strip()
         
-        # Create directory structure
+        # Create directory structure with proper formatting
         dir_path = os.path.join(SPATH, phi_str, f"DA{int(ds):02d}_SR{int(sampleRateMHz)}", StringForClearing)
         
         try:
             os.makedirs(dir_path, exist_ok=True)
             logging.info(f"Created directory: {dir_path}")
         except OSError as e:
-            logging.error(f"Error creating directory: {e}")
-            # Try an alternative path if the first one fails
-            alt_path = os.path.join(SPATH, f"phi_{phi:.3f}_DA_{ds}")
-            logging.info(f"Trying alternative path: {alt_path}")
-            os.makedirs(alt_path, exist_ok=True)
-            dir_path = alt_path
+            logging.error(f"Failed to create directory {dir_path}: {e}")
+            raise  # Re-raise the exception instead of using a fallback path
         
         # Create timestamp and filename
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         savefile = os.path.join(dir_path, f"{device_name}_{timestamp}.bin")
-        last_savefile = savefile  # Store the path for returning
-        
+        last_savefile = savefile
+
         # Calculate actual sample rate
         samplesPerPoint = int(max(origRateMHz / sampleRateMHz, 1))
         actualSampleRateMHz = origRateMHz / samplesPerPoint
@@ -668,8 +652,8 @@ def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength
             logging.error(f"Error during acquisition: {e}")
         
         # Write basic info to the metadata file
-        with open(savefile[0:-4] + ".txt", 'w') as f:
-            f.write(f"--- Basic Info ---\n")
+        with open(savefile[0:-4] + ".txt", 'w') as f:  # 'w' mode for initial write
+            f.write("=== Basic Info ===\n")
             f.write(f"Timestamp: {time.strftime('%c')}\n")
             f.write(f"Digital Attenuator: {DA.getValue('Attenuation')} dB\n")
             f.write(f"Sample rate: {actualSampleRateMHz} MHz\n")
@@ -677,7 +661,7 @@ def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength
             f.write(f"Phi: {phi:.6f}\n")
             f.write(f"Clearing frequency: {f_clearing:.6f} GHz\n")
             f.write(f"Clearing power: {P_clearing:.6f} dBm\n")
-            f.write(f"--- End Basic Info ---\n\n")
+            f.write("=== End Basic Info ===\n")
         
         sleep(0.05)
 

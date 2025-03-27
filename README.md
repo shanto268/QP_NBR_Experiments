@@ -37,3 +37,9 @@ for phi in phi_arr:
 
 
 ```
+
+---
+
+## To Do:
+
+- [ ] Add feature to upload saved data to HPC via Globus and clear out local files safely
