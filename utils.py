@@ -546,7 +546,7 @@ def write_metadata(savefile, acquisitionLength_sec, actualSampleRateMHz, fd, vol
     """
     try:
         metadata_file = savefile[0:-4] + ".txt"
-        print(f"Writing metadata to: {metadata_file}")
+        #print(f"Writing metadata to: {metadata_file}")
         
         # Open the file in append mode to add metadata
         with open(metadata_file, 'a') as f:

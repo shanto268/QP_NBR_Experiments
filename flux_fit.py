@@ -85,7 +85,7 @@ def phi_to_voltage(phi, best_params, unit='mV'):
 
     voltage = phi * V_period + V_offset
     if unit == 'V':
-        voltage = voltage * 1e-4
+        voltage = voltage * 1e-3
     elif unit == 'mV':
         voltage = voltage
     else:
