@@ -43,3 +43,6 @@ for phi in phi_arr:
 ## To Do:
 
 - [ ] Add feature to upload saved data to HPC via Globus and clear out local files safely
+- [ ] Add resonator circle fit code
+- [ ] Use the multi-flux-fit to move on to different branches dynamically
+- [ ] Add the dynamic driving next mode code
