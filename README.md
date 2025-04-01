@@ -46,3 +46,4 @@ for phi in phi_arr:
 - [ ] Add feature to change .bin to a lower storage fingerprint file
 - [ ] Add resonator circle fit code
 - [ ] Add the dynamic driving next mode code
+- [ ] Add code to dynamically change the frequency search range based on multiple flux quanta fit data
