@@ -38,12 +38,24 @@ for phi in phi_arr:
 
 ```
 
+## Set Up:
+
+### HPC:
+
+Make sure you have SSH access to your HPC cluster
+Set up SSH key-based authentication to avoid password prompts
+Fill in the .env file with your HPC details
+
+### Measurements:
+
+1. Flux tuning curve of the resonator
+
 ---
 
 ## To Do:
 
-- [ ] Add feature to upload saved data to HPC via Globus and clear out local files safely
 - [ ] Add feature to change .bin to a lower storage fingerprint file
 - [ ] Add resonator circle fit code
 - [ ] Add the dynamic driving next mode code
 - [ ] Add code to dynamically change the frequency search range based on multiple flux quanta fit data
+- [ ] Add feature to upload saved data to HPC via Globus API
