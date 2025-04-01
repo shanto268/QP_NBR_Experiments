@@ -478,8 +478,8 @@ def turn_off_vna():
     VNA.setValue('Output enabled',False)
     sleep(0.05)
 
-def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, detuning=0, show_plot=False):
-    f_guess = find_mapped_resonance(phi, best_fit)
+def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, detuning=0, show_plot=False, ofq=None):
+    f_guess = find_mapped_resonance(phi, best_fit, ofq)
     print(f"f_guess: {f_guess} GHz from the fitted Flux Curve")
     turn_on_vna()
     set_vna(f_guess, span, power, avg, electrical_delay)
