@@ -54,6 +54,7 @@ Fill in the .env file with your HPC details
 
 ## To Do:
 
+- [ ] bac
 - [ ] Add feature to change .bin to a lower storage fingerprint file
 - [ ] Add resonator circle fit code
 - [ ] Add the dynamic driving next mode code

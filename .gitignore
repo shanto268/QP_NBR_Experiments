@@ -9,3 +9,6 @@ james_files
 .DS_Store
 .env
 __pycache__
+data
+*.log
+.daemon.pid

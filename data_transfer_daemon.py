@@ -18,38 +18,42 @@ load_dotenv()
 
 class DataTransferHandler(FileSystemEventHandler):
     def __init__(self):
-        # Basic setup
         self.source_path = os.getenv('LOCAL_STORAGE_PATH')
         self.hpc_user = os.getenv('HPC_USERNAME')
         self.hpc_host = os.getenv('HPC_HOSTNAME')
-        self.destination_path = os.getenv('HPC_BASE_PATH')
+        self.destination_path = os.getenv('HPC_BASE_PATH')  # This is now the full path
         self.project_name = os.getenv('PROJECT_NAME')
         self.device_name = os.getenv('DEVICE_NAME')
-        self.batch_size = int(os.getenv('BATCH_SIZE', '10'))
+        self.batch_size = 1  # Process files immediately instead of batching
+        self.last_process_time = time.time()
+        self.process_interval = 0.5  # Process at least every 500ms
         
-        # Validation
         if not all([self.source_path, self.hpc_user, self.hpc_host, 
-                   self.destination_path, self.project_name, self.device_name]):
+                   self.destination_path]):
             raise ValueError("Missing required environment variables")
         
-        # Create paths
-        self.hpc_experiment_path = os.path.join(
-            self.destination_path,
-            self.project_name,
-            self.device_name
-        )
+        # Now we use destination_path directly since it's the full path
+        self.hpc_experiment_path = self.destination_path
         
-        # State tracking
+        logging.info(f"Local source path: {self.source_path}")
+        logging.info(f"HPC path: {self.hpc_experiment_path}")
+        
         self.pending_files = {}
-        self.transfer_history_file = os.path.join(self.source_path, '.transfer_history.json')
-        self.lock_file = os.path.join(self.source_path, '.transfer.lock')
         
-        # Setup logging with more detailed format
+        # Setup logging with absolute path
+        log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data_transfer.log')
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-            filename=os.path.join(self.source_path, 'data_transfer.log')
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            filename=log_file
         )
+        
+        # Verify HPC directory exists
+        self._ensure_remote_directory()
+        
+        # State tracking
+        self.transfer_history_file = os.path.join(self.source_path, '.transfer_history.json')
+        self.lock_file = os.path.join(self.source_path, '.transfer.lock')
         
         # Load transfer history
         self.transfer_history = self._load_transfer_history()
@@ -59,9 +63,6 @@ class DataTransferHandler(FileSystemEventHandler):
         
         # Initial connection test
         self._test_hpc_connection()
-        
-        # Create remote directory structure
-        self._ensure_remote_directory()
 
     def _acquire_lock(self):
         """Ensure only one instance is running"""
@@ -87,26 +88,45 @@ class DataTransferHandler(FileSystemEventHandler):
             json.dump(self.transfer_history, f, indent=2)
 
     def _test_hpc_connection(self):
-        """Test HPC connection and SSH setup"""
+        """Test HPC connection and SSH setup with detailed error reporting"""
         try:
-            # Test basic connection
-            test_cmd = f"ssh -q {self.hpc_user}@{self.hpc_host} echo 'test'"
-            subprocess.run(test_cmd, shell=True, check=True, timeout=10)
+            # Test basic connection with verbose output
+            test_cmd = f"ssh -v {self.hpc_user}@{self.hpc_host} echo 'test'"
+            result = subprocess.run(
+                test_cmd, 
+                shell=True, 
+                capture_output=True, 
+                text=True,
+                timeout=30
+            )
             
-            # Test write permissions
-            test_dir = os.path.join(self.hpc_experiment_path, '.test')
-            test_file = os.path.join(test_dir, 'test.txt')
-            cmds = [
-                f"mkdir -p {test_dir}",
-                f"touch {test_file}",
-                f"rm {test_file}",
-                f"rmdir {test_dir}"
-            ]
-            for cmd in cmds:
-                subprocess.run(f"ssh {self.hpc_user}@{self.hpc_host} '{cmd}'", 
-                             shell=True, check=True, timeout=10)
+            if result.returncode != 0:
+                logging.error("SSH Connection Test Details:")
+                logging.error(f"Command: {test_cmd}")
+                logging.error(f"Return Code: {result.returncode}")
+                logging.error(f"STDOUT: {result.stdout}")
+                logging.error(f"STDERR: {result.stderr}")
+                
+                # Check common SSH issues
+                if "Permission denied" in result.stderr:
+                    logging.error("SSH key authentication failed. Please check your SSH keys")
+                elif "Could not resolve hostname" in result.stderr:
+                    logging.error("Could not resolve HPC hostname. Check your .env file and network connection")
+                elif "Connection refused" in result.stderr:
+                    logging.error("Connection was refused. Check if SSH service is running on HPC")
+                elif "Connection timed out" in result.stderr:
+                    logging.error("Connection timed out. Check your network connection and HPC status")
+                    
+                raise RuntimeError("SSH connection test failed")
+                
+            logging.info("SSH connection test successful")
+            
+        except subprocess.TimeoutExpired:
+            logging.error("SSH connection test timed out after 30 seconds")
+            raise
         except Exception as e:
-            raise RuntimeError(f"HPC connection test failed: {str(e)}")
+            logging.error(f"Unexpected error during SSH test: {str(e)}")
+            raise
 
     def _is_file_ready(self, filepath, wait_time=5):
         """
@@ -152,12 +172,15 @@ class DataTransferHandler(FileSystemEventHandler):
         return False
 
     def process_pending_files(self):
-        """Enhanced file processing with better error handling"""
+        """Process pending file transfers with detailed logging"""
         if not self.pending_files:
             return
             
+        logging.info(f"Processing {len(self.pending_files)} pending files")
+        
         # Test connection before starting transfers
         try:
+            logging.info("Testing HPC connection before transfer...")
             self._test_hpc_connection()
         except Exception as e:
             logging.error(f"HPC connection failed, skipping transfers: {str(e)}")
@@ -169,16 +192,26 @@ class DataTransferHandler(FileSystemEventHandler):
             txt_path = file_info['txt_path']
             rel_dir = file_info['relative_dir']
             
-            # Skip if files are still being written
-            if not all(self._is_file_ready(f) for f in [bin_path, txt_path]):
-                continue
+            logging.info(f"\nProcessing file pair:")
+            logging.info(f"Binary file: {bin_path}")
+            logging.info(f"Text file: {txt_path}")
+            logging.info(f"Relative directory: {rel_dir}")
             
             remote_dir = os.path.join(self.hpc_experiment_path, rel_dir)
+            logging.info(f"Remote directory will be: {remote_dir}")
             
             try:
-                # Ensure remote directory exists
+                # Create remote directory
                 mkdir_cmd = f"ssh {self.hpc_user}@{self.hpc_host} 'mkdir -p {remote_dir}'"
-                subprocess.run(mkdir_cmd, shell=True, check=True, timeout=30)
+                logging.info(f"Creating remote directory with command: {mkdir_cmd}")
+                
+                result = subprocess.run(mkdir_cmd, shell=True, capture_output=True, text=True)
+                if result.returncode != 0:
+                    logging.error(f"Failed to create remote directory:")
+                    logging.error(f"Return code: {result.returncode}")
+                    logging.error(f"STDOUT: {result.stdout}")
+                    logging.error(f"STDERR: {result.stderr}")
+                    continue
                 
                 transfer_success = True
                 for local_file in [bin_path, txt_path]:
@@ -186,40 +219,40 @@ class DataTransferHandler(FileSystemEventHandler):
                     remote_path = f"{self.hpc_user}@{self.hpc_host}:{os.path.join(remote_dir, filename)}"
                     remote_full_path = os.path.join(remote_dir, filename)
                     
-                    # Check if file already exists on remote
-                    check_cmd = f"ssh {self.hpc_user}@{self.hpc_host} '[ -f {remote_full_path} ]'"
-                    if subprocess.run(check_cmd, shell=True).returncode == 0:
-                        logging.warning(f"File already exists on remote: {remote_full_path}")
-                        continue
+                    logging.info(f"\nTransferring {local_file} to {remote_path}")
                     
-                    # Transfer with rsync
-                    rsync_cmd = f"rsync -av --progress {local_file} {remote_path}"
-                    subprocess.run(rsync_cmd, shell=True, check=True, timeout=3600)  # 1 hour timeout
+                    # Use rsync with verbose output
+                    rsync_cmd = f"rsync -avz --progress {local_file} {remote_path}"
+                    logging.info(f"Transfer command: {rsync_cmd}")
                     
-                    # Verify transfer
-                    if not self._verify_transfer(local_file, remote_full_path):
+                    result = subprocess.run(rsync_cmd, shell=True, capture_output=True, text=True)
+                    if result.returncode != 0:
+                        logging.error("Transfer failed:")
+                        logging.error(f"Return code: {result.returncode}")
+                        logging.error(f"STDOUT: {result.stdout}")
+                        logging.error(f"STDERR: {result.stderr}")
                         transfer_success = False
                         break
+                    
+                    logging.info("Transfer completed, verifying...")
+                    if not self._verify_transfer(local_file, remote_full_path):
+                        logging.error(f"Verification failed for {local_file}")
+                        transfer_success = False
+                        break
+                    
+                    logging.info("Verification successful")
                 
                 if transfer_success:
-                    # Only remove local files after successful transfer and verification
+                    logging.info("Both files transferred successfully, cleaning up...")
                     for local_file in [bin_path, txt_path]:
-                        if os.path.exists(local_file):
-                            # Keep a backup of the metadata
-                            if local_file.endswith('.txt'):
-                                with open(local_file, 'r') as f:
-                                    self.transfer_history[local_file + '_content'] = f.read()
-                            os.remove(local_file)
-                            logging.info(f"Removed verified file: {local_file}")
+                        os.remove(local_file)
+                        logging.info(f"Removed verified file: {local_file}")
                     
                     del self.pending_files[bin_path]
-                    self._save_transfer_history()
-                    
-                    # Clean up empty directories
                     self._cleanup_empty_directories(bin_path)
                     
             except Exception as e:
-                logging.error(f"Transfer failed for {bin_path}: {str(e)}")
+                logging.error(f"Error processing {bin_path}: {str(e)}")
                 continue
 
     def _cleanup_empty_directories(self, start_path):
@@ -236,30 +269,50 @@ class DataTransferHandler(FileSystemEventHandler):
                 break
 
     def _ensure_remote_directory(self):
-        """Ensure the remote directory structure exists"""
-        cmd = f"ssh {self.hpc_user}@{self.hpc_host} 'mkdir -p {self.hpc_experiment_path}'"
+        """Verify the HPC directory exists and is writable"""
         try:
-            subprocess.run(cmd, shell=True, check=True)
-            logging.info(f"Ensured remote directory exists: {self.hpc_experiment_path}")
+            # Check if directory exists
+            check_cmd = f"ssh {self.hpc_user}@{self.hpc_host} '[ -d {self.hpc_experiment_path} ]'"
+            result = subprocess.run(check_cmd, shell=True)
+            
+            if result.returncode != 0:
+                logging.error(f"HPC directory {self.hpc_experiment_path} does not exist or is not accessible")
+                raise RuntimeError(f"HPC directory {self.hpc_experiment_path} is not accessible")
+            
+            # Verify write permissions with a test file
+            test_cmd = f"ssh {self.hpc_user}@{self.hpc_host} 'touch {self.hpc_experiment_path}/.test && rm {self.hpc_experiment_path}/.test'"
+            subprocess.run(test_cmd, shell=True, check=True)
+            logging.info(f"Verified write access to: {self.hpc_experiment_path}")
+            
         except subprocess.CalledProcessError as e:
-            logging.error(f"Failed to create remote directory: {e}")
+            logging.error(f"Failed to verify HPC directory: {e}")
+            raise RuntimeError(f"Failed to verify HPC directory: {e}")
     
     def on_created(self, event):
-        """Handle file creation events."""
+        """Handle file creation events immediately"""
         if event.is_directory:
             return
             
         filepath = event.src_path
+        current_time = time.time()
         
         # Only process .bin files and their companion .txt files
         if filepath.endswith('.bin'):
             txt_path = filepath[:-4] + '.txt'
             if os.path.exists(txt_path):
                 self._add_to_pending(filepath, txt_path)
+                # Process immediately if enough time has passed
+                if current_time - self.last_process_time >= self.process_interval:
+                    self.process_pending_files()
+                    self.last_process_time = current_time
         elif filepath.endswith('.txt'):
             bin_path = filepath[:-4] + '.bin'
             if os.path.exists(bin_path):
                 self._add_to_pending(bin_path, filepath)
+                # Process immediately if enough time has passed
+                if current_time - self.last_process_time >= self.process_interval:
+                    self.process_pending_files()
+                    self.last_process_time = current_time
     
     def _add_to_pending(self, bin_path, txt_path):
         """Add a file pair to pending transfers."""
@@ -272,9 +325,6 @@ class DataTransferHandler(FileSystemEventHandler):
         }
         
         logging.info(f"Added to pending transfers: {rel_path}")
-        
-        if len(self.pending_files) >= self.batch_size:
-            self.process_pending_files()
     
     def _get_file_checksum(self, filepath):
         """Calculate SHA-256 checksum of a local file"""
@@ -296,38 +346,25 @@ class DataTransferHandler(FileSystemEventHandler):
             return None
 
 def run_watcher():
-    """Run the file watcher with enhanced error handling"""
-    retry_delay = 60  # seconds
-    max_retries = 5
+    """Run the file watcher with more frequent checks"""
+    handler = DataTransferHandler()
+    observer = Observer()
+    observer.schedule(handler, handler.source_path, recursive=True)
+    observer.start()
     
-    for attempt in range(max_retries):
-        try:
-            handler = DataTransferHandler()
-            observer = Observer()
-            observer.schedule(handler, handler.source_path, recursive=True)
-            observer.start()
-            
-            logging.info(f"Started watching: {handler.source_path}")
-            logging.info(f"Transferring to: {handler.hpc_experiment_path}")
-            
-            while True:
-                time.sleep(1)
-                handler.process_pending_files()
-                
-        except Exception as e:
-            logging.error(f"Watcher error on attempt {attempt + 1}: {str(e)}")
-            if attempt < max_retries - 1:
-                logging.info(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-            else:
-                logging.error("Max retries reached, exiting.")
-                raise
-        finally:
-            try:
-                observer.stop()
-                observer.join()
-            except Exception as e:
-                logging.error(f"Error stopping observer: {str(e)}")
+    logging.info(f"Started watching: {handler.source_path}")
+    logging.info(f"Transferring to: {handler.hpc_experiment_path}")
+    
+    try:
+        while True:
+            # Process files more frequently
+            handler.process_pending_files()
+            time.sleep(0.1)  # Check every 100ms instead of 1 second
+    except KeyboardInterrupt:
+        logging.info("Stopping file watcher")
+    finally:
+        observer.stop()
+        observer.join()
 
 if __name__ == "__main__":
     run_watcher()
