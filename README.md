@@ -2,7 +2,13 @@
 
 ## Experiment 0: Flux Sweeping:
 
+A notebook that uses the SRS voltage source to sweep flux and record the resonator responce using the VNA.
+
+**notebook name:** [experiment0.ipynb](experiment0.ipynb)
+
 ## Experiment 1: Acquiring time-domain IQ data following the flux curve and varying the clearing tone frequency and power
+
+**notebook name:** [experiment1.ipynb](experiment1.ipynb)
 
 High level overview:
 
@@ -56,7 +62,7 @@ Fill in the .env file with your HPC details
 
 ## To Do:
 
-- [ ] bac
+- [ ] Test the rsync HPC back up mechanism
 - [ ] Add feature to change .bin to a lower storage fingerprint file
 - [ ] Add resonator circle fit code
 - [ ] Add the dynamic driving next mode code
