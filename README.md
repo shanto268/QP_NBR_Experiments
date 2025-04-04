@@ -72,6 +72,19 @@ Fill in the .env file with your HPC details
 ### Measurements:
 
 1. Flux tuning curve of the resonator
+
+---
+
+## To Do:
+
+- [ ] Test the rsync HPC back up mechanism
+- [ ] Add code to dynamically change the frequency search range based on multiple flux quanta fit data
+- [ ] drive mode present needs to have a good power of DA setting in the loop
+- [ ] Add feature to change .bin to a lower storage fingerprint file as a dameon
+- [ ] Add resonator circle fit code
+- [ ] Add the dynamic driving next mode code
+- [ ] Add feature to upload saved data to HPC via Globus API
+
 </details>
 
 <details>
@@ -84,12 +97,3 @@ A notebook that sets the LO at user specified parameters and takes the time doma
 </details>
 
 ---
-
-## To Do:
-
-- [ ] Test the rsync HPC back up mechanism
-- [ ] Add feature to change .bin to a lower storage fingerprint file
-- [ ] Add resonator circle fit code
-- [ ] Add the dynamic driving next mode code
-- [ ] Add code to dynamically change the frequency search range based on multiple flux quanta fit data
-- [ ] Add feature to upload saved data to HPC via Globus API

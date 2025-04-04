@@ -538,9 +538,12 @@ def turn_off_vna():
     VNA.setValue('Output enabled',False)
     sleep(0.05)
 
-def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, detuning=0, show_plot=False, ofq=None):
-    f_guess = find_mapped_resonance(phi, best_fit, ofq)
-    print(f"f_guess: {f_guess} GHz from the fitted Flux Curve")
+def find_resonance(phi, span, best_fit, power=5, avg=25, electrical_delay=82.584e-9, detuning=0, show_plot=False, ofq=None, f_guess=None):
+    if f_guess is None:
+        f_guess = find_mapped_resonance(phi, best_fit, ofq)
+        print(f"f_guess: {f_guess} GHz from the fitted Flux Curve")
+    else:
+        print(f"f_guess: {f_guess} GHz from the flux fit")
     turn_on_vna()
     set_vna(f_guess, span, power, avg, electrical_delay)
     f_phi, f_d = fit_vna_trace(f_guess, phi, detuning, show_plot=show_plot)
@@ -600,7 +603,7 @@ def write_metadata(metadata_file, acquisitionLength_sec, actualSampleRateMHz, fd
         f.write("=== Experiment Metadata ===\n")
         f.write(f"Channels: AB\n")
         f.write(f"Acquisition duration: {acquisitionLength_sec} seconds\n")
-        f.write(f"Sample Rate: {actualSampleRateMHz} MHz\n")
+        f.write(f"Sample Rate MHz: {actualSampleRateMHz} MHz\n")
         f.write(f"Drive frequency: {fd*1e-9:.6f} GHz\n")
         f.write(f"Temperature MXC: {T} mK\n")
         f.write(f"Radiator temperature: {T_rad} mK\n")
@@ -646,7 +649,7 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
     savefile : str
         Path to the last saved binary file
     """
-    global SPATH, DA, PATH_TO_EXE, device_name
+    global SPATH, DA, PATH_TO_EXE, device_name, LO, Drive, TWPA_PUMP
     
     last_savefile = None
 
@@ -656,8 +659,11 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
     now = perf_counter()
 
     # Create a safe directory name for the clearing tone parameters
-    StringForClearing = f"clearing_{f_clearing:.2f}GHz_{P_clearing:.1f}dBm".replace('.', 'p')
-
+    if f_clearing is not None and P_clearing is not None:
+        StringForClearing = f"clearing_{f_clearing:.2f}GHz_{P_clearing:.1f}dBm".replace('.', 'p')
+    else:
+        StringForClearing = "no_clearing"
+        
     for ds in tqdm(np.arange(lowerBound, upperBound+1, 2)):
         DA.setValue('Attenuation', ds)  # dB
         
@@ -699,8 +705,12 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
             f.write(f"Sample rate: {actualSampleRateMHz} MHz\n")
             f.write(f"Acquisition length: {acquisitionLength_sec} seconds\n")
             f.write(f"Phi: {phi:.6f}\n")
-            f.write(f"Clearing frequency: {f_clearing:.6f} GHz\n")
-            f.write(f"Clearing power: {P_clearing:.6f} dBm\n")
+            f.write(f"LO_frequency: {LO.getValue('Frequency')*1e-9:.6f} GHz\n")
+            try:
+                f.write(f"Clearing frequency: {f_clearing:.6f} GHz\n")
+                f.write(f"Clearing power: {P_clearing:.6f} dBm\n")
+            except:
+                pass
             f.write("=== End Basic Info ===\n")
         
         sleep(0.05)
