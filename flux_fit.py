@@ -747,3 +747,210 @@ def reject_frequency_outliers(df, freq_threshold=5.79e9):
     cleaned_df = df[mask].copy()
     
     return cleaned_df, mask, stats
+
+def load_flux_quanta_analysis(json_path):
+    """
+    Load flux quanta analysis results from a JSON file.
+    
+    Parameters:
+    -----------
+    json_path : str
+        Path to the flux quanta analysis JSON file
+        
+    Returns:
+    --------
+    dict
+        Dictionary containing the analysis results
+    """
+    import json
+
+    import numpy as np
+
+    # Load the JSON file
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+    
+    # Convert lists back to numpy arrays for numerical data
+    if 'maxima_voltages' in data:
+        data['maxima_voltages'] = np.array(data['maxima_voltages'])
+    
+    if 'maxima_indices' in data:
+        data['maxima_indices'] = np.array(data['maxima_indices'])
+    
+    # Convert the quanta data back to numpy arrays
+    if 'quanta' in data:
+        for quantum_key, quantum_data in data['quanta'].items():
+            if 'voltage' in quantum_data:
+                quantum_data['voltage'] = np.array(quantum_data['voltage'])
+            if 'frequency' in quantum_data:
+                quantum_data['frequency'] = np.array(quantum_data['frequency'])
+            if 'flux' in quantum_data:
+                quantum_data['flux'] = np.array(quantum_data['flux'])
+            
+            # Convert fit curve data to numpy arrays
+            if 'fit_curve' in quantum_data:
+                for key, value in quantum_data['fit_curve'].items():
+                    quantum_data['fit_curve'][key] = np.array(value)
+            
+            # Convert best fit parameters
+            if 'best_fit' in quantum_data and quantum_data['best_fit'] is not None:
+                if 'pcov' in quantum_data['best_fit']:
+                    quantum_data['best_fit']['pcov'] = np.array(quantum_data['best_fit']['pcov'])
+    
+    # Convert boundary values to numpy arrays
+    if 'boundaries' in data and 'voltages' in data['boundaries']:
+        data['boundaries']['voltages'] = np.array(data['boundaries']['voltages'])
+    
+    print(f"Loaded flux quanta analysis with {data['n_periods']} periods")
+    print(f"Period estimate: {data['period_estimate']:.2f} mV")
+    
+    return data
+
+def phi_to_voltage_frequency(flux_data, phi_values):
+    """
+    Convert normalized flux (phi) values to voltage and frequency using the 
+    fitted parameters for each flux quantum.
+    
+    Parameters:
+    -----------
+    flux_data : dict
+        Flux quanta analysis results loaded from JSON
+    phi_values : float or list/array of floats
+        Phi value(s) to convert
+        
+    Returns:
+    --------
+    dict
+        Dictionary with results for each quantum
+    """
+    import numpy as np
+
+    # Ensure phi_values is an array
+    if np.isscalar(phi_values):
+        phi_values = [phi_values]
+    else:
+        phi_values = np.array(phi_values)
+    
+    results = {}
+    
+    for quantum_key, quantum_data in flux_data['quanta'].items():
+        # Skip if no best fit
+        if 'best_fit' not in quantum_data or quantum_data['best_fit'] is None:
+            continue
+            
+        # Get fit parameters
+        best_fit = quantum_data['best_fit']
+        w0 = best_fit['w0']
+        q0 = best_fit['q0']
+        V_period = best_fit['V_period']
+        V_offset = best_fit['V_offset']
+        
+        # Calculate voltages for the phi values
+        voltages = phi_values * V_period + V_offset
+        
+        # Calculate frequencies using the resonant_frequency function
+        frequencies = []
+        for phi in phi_values:
+            # Compute the formula terms
+            sin_term = np.sin(np.pi * phi / 2)
+            
+            # To avoid numerical issues, clip the sin values
+            clipped_sin = np.clip(sin_term, -0.99, 0.99)
+            
+            # Calculate arctanh (inverse hyperbolic tangent)
+            arctanh_term = np.arctanh(clipped_sin)
+            
+            # Calculate numerator and denominator
+            numerator = clipped_sin * arctanh_term
+            denominator = 1 - clipped_sin * arctanh_term
+            
+            # Handle potential numerical issues in denominator
+            safe_denominator = denominator if abs(denominator) > 1e-10 else 1e-10 * np.sign(denominator)
+            
+            # Calculate the frequency
+            exponent = -0.5
+            frequency = w0 * (1 + q0 * numerator / safe_denominator) ** exponent
+            frequencies.append(frequency)
+        
+        # Store results for this quantum
+        results[quantum_key] = {
+            "phi": phi_values,
+            "voltage": voltages,
+            "frequency": frequencies
+        }
+    
+    return results
+
+def process_phi_results(phi_results):
+    guess_data = {}
+    for quantum_key, results in phi_results.items():
+        print(f"\n{quantum_key}:")
+        for i, phi in enumerate(results['phi']):
+            print(f"  φ = {phi:.2f} → Voltage = {results['voltage'][i]:.2f} mV → Frequency = {results['frequency'][i]:.3e} Hz")
+            guess_data[quantum_key] = {'voltage' : results['voltage'][i], 'frequency' : results['frequency'][i], 'phi' : phi}
+    return guess_data
+
+def plot_phi_points(flux_data, phi_values):
+    """
+    Plot the original data, fits, and user-specified phi points for each quantum.
+    
+    Parameters:
+    -----------
+    flux_data : dict
+        Flux quanta analysis results loaded from JSON
+    phi_values : float or list/array of floats
+        Phi value(s) to highlight on the plots
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Calculate voltage and frequency for each phi value
+    phi_results = phi_to_voltage_frequency(flux_data, phi_values)
+    
+    # Create overview plot
+    plt.figure(figsize=(12, 6))
+    
+    # Plot boundaries
+    boundaries = flux_data['boundaries']['voltages']
+    for boundary in boundaries:
+        plt.axvline(x=boundary, color='gray', linestyle='--', alpha=0.3)
+    
+    # Colors for different quanta
+    colors = plt.cm.rainbow(np.linspace(0, 1, flux_data['n_periods']))
+    
+    # Plot each quantum
+    for i, (quantum_key, quantum_data) in enumerate(flux_data['quanta'].items()):
+        # Plot data points
+        plt.scatter(quantum_data['voltage'], quantum_data['frequency'], 
+                   color=colors[i], alpha=0.5, label=f'Quantum {quantum_key[-1]}')
+        
+        # Plot fit curve if available
+        if 'fit_curve' in quantum_data:
+            plt.plot(quantum_data['fit_curve']['voltage'], 
+                    quantum_data['fit_curve']['frequency'], 
+                    '-', color=colors[i], alpha=0.8)
+    
+    # Plot the specified phi points for each quantum
+    for i, (quantum_key, results) in enumerate(phi_results.items()):
+        plt.scatter(results['voltage'], results['frequency'], 
+                   marker='*', s=150, color=colors[i], edgecolor='black',
+                   label=f'Phi points {quantum_key[-1]}')
+        
+        # Add text labels for phi values
+        for j, (phi, v, f) in enumerate(zip(results['phi'], results['voltage'], results['frequency'])):
+            plt.annotate(f'φ={phi:.2f}', 
+                        (v, f), 
+                        xytext=(10, 10),
+                        textcoords='offset points',
+                        fontsize=8,
+                        bbox=dict(boxstyle="round", fc="white", alpha=0.7))
+    
+    plt.xlabel('Voltage (mV)')
+    plt.ylabel('Frequency (Hz)')
+    plt.title('Flux Quanta with User-Specified Phi Points')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+    
+    return phi_results
