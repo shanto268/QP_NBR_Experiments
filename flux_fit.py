@@ -1,3 +1,6 @@
+import json
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import curve_fit
@@ -448,3 +451,299 @@ def voltage_to_flux_quanta(voltage, best_params):
 
     flux_quanta = (voltage - V_offset) / V_period
     return flux_quanta
+
+
+def make_json_serializable(obj):
+    """Convert numpy arrays, pandas DataFrames and other non-serializable objects to JSON serializable types."""
+    import pandas as pd
+    
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, pd.DataFrame):
+        return obj.to_dict('records')  # Convert DataFrame to list of records
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    else:
+        return obj
+
+def identify_flux_quanta(df, save_path=""):
+    """
+    Identify and fit individual flux quanta in the resonator frequency vs voltage dataset.
+    Works for both single and multiple flux quanta.
+    """
+    import matplotlib.backends.backend_pdf
+    from scipy.optimize import curve_fit
+    from scipy.signal import find_peaks
+
+    # Sort the dataframe by voltage to ensure proper peak finding
+    df_sorted = df.sort_values('voltage').reset_index(drop=True)
+    
+    # Calculate prominence threshold from the data
+    f_range = df_sorted['f'].max() - df_sorted['f'].min()
+    prominence_threshold = f_range * 0.1
+    
+    # Find maxima in the frequency data
+    maxima_indices, peak_properties = find_peaks(
+        df_sorted['f'].values,
+        distance=10,
+        prominence=prominence_threshold
+    )
+    
+    # Handle case where no maxima are found (likely single quantum)
+    if len(maxima_indices) == 0:
+        print("No clear maxima found. Treating as single flux quantum.")
+        maxima_indices = np.array([np.argmax(df_sorted['f'].values)])
+        avg_period = np.abs(df_sorted['voltage'].max() - df_sorted['voltage'].min())
+    else:
+        # Get the voltage values at the maxima
+        maxima_voltages = df_sorted['voltage'].iloc[maxima_indices].values
+        
+        # Calculate the average period from voltage differences between peaks
+        periods = np.diff(maxima_voltages)
+        avg_period = np.mean(periods)
+    
+    maxima_voltages = df_sorted['voltage'].iloc[maxima_indices].values
+    n_quanta = max(1, len(maxima_indices))
+    
+    print(f"Detected {n_quanta} flux quanta")
+    print(f"Estimated period: {avg_period:.2f} mV")
+    
+    # Initialize PDF
+    pdf_name = os.path.join(save_path, "flux_quanta_analysis.pdf")
+    pdf = matplotlib.backends.backend_pdf.PdfPages(pdf_name)
+    
+    # Colors for different quanta
+    n_quanta = len(maxima_indices)
+    colors = plt.cm.rainbow(np.linspace(0, 1, n_quanta))
+    
+    # Create the overview plot (Plot 1)
+    fig1 = plt.figure(figsize=(12, 6))
+    
+    # Calculate boundaries
+    all_boundaries = []
+    if n_quanta == 1:
+        # For single quantum, use the full voltage range
+        all_boundaries = [
+            df_sorted['voltage'].min(),
+            df_sorted['voltage'].max()
+        ]
+    else:
+        # For multiple quanta, calculate boundaries as before
+        first_half_period = periods[0] / 2 if len(periods) > 0 else avg_period / 2
+        all_boundaries.append(maxima_voltages[0] - first_half_period)
+        
+        for i in range(len(maxima_voltages) - 1):
+            midpoint = (maxima_voltages[i] + maxima_voltages[i + 1]) / 2
+            all_boundaries.append(midpoint)
+        
+        last_half_period = periods[-1] / 2 if len(periods) > 0 else avg_period / 2
+        all_boundaries.append(maxima_voltages[-1] + last_half_period)
+    
+    # Store boundary information
+    boundary_info = {
+        'voltages': all_boundaries,
+        'descriptions': ([f'Start of quantum 0'] + 
+                       [f'Transition between quantum {i} and {i+1}' for i in range(n_quanta-1)] +
+                       [f'End of quantum {n_quanta-1}']) if n_quanta > 1 else 
+                      ['Start of quantum', 'End of quantum']
+    }
+
+    # Separate data into flux quanta and plot overview
+    quanta = {}
+    
+    def fit_func(x, w0, q0, V_offset):
+        return resonant_frequency(x, w0, q0, avg_period, V_offset)
+    
+    # Plot overview with colored quanta
+    for i in range(len(all_boundaries) - 1):
+        mask = (df_sorted['voltage'] >= all_boundaries[i]) & (df_sorted['voltage'] < all_boundaries[i + 1])
+        voltage_data = df_sorted.loc[mask, 'voltage'].values
+        freq_data = df_sorted.loc[mask, 'f'].values
+        plt.scatter(voltage_data, freq_data, color=colors[i], alpha=0.5, label=f'Quantum {i}')
+    
+    # Add maxima points and boundaries to overview
+    plt.scatter(maxima_voltages, df_sorted['f'].iloc[maxima_indices], 
+                color='black', marker='x', s=100, label='Maxima')
+    for boundary in all_boundaries:
+        plt.axvline(x=boundary, color='gray', linestyle='--', alpha=0.3)
+    
+    plt.xlabel('Voltage (mV)')
+    plt.ylabel('Frequency (Hz)')
+    plt.title(f'Overview: {n_quanta} Flux Quanta\nEstimated Period: {avg_period:.2f} mV')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Save the first plot
+    pdf.savefig(fig1)
+    
+    # Create detailed subplots (Plot 2)
+    fig2, axs = plt.subplots(n_quanta, 1, figsize=(12, 4*n_quanta))
+    if n_quanta == 1:
+        axs = [axs]
+    
+    # Process each quantum
+    for i in range(len(all_boundaries) - 1):
+        mask = (df_sorted['voltage'] >= all_boundaries[i]) & (df_sorted['voltage'] < all_boundaries[i + 1])
+        voltage_data = df_sorted.loc[mask, 'voltage'].values
+        freq_data = df_sorted.loc[mask, 'f'].values
+        
+        # Calculate normalized flux
+        flux_data = (voltage_data - voltage_data[np.argmax(freq_data)]) / avg_period
+        
+        # Initial parameter guesses
+        w0_guess = np.max(freq_data)
+        q0_guess = 0.05
+        V_offset_guess = voltage_data[np.argmax(freq_data)]
+        
+        try:
+            # Perform the fit
+            popt, pcov = curve_fit(
+                fit_func, 
+                voltage_data, 
+                freq_data,
+                p0=[w0_guess, q0_guess, V_offset_guess],
+                bounds=([w0_guess*0.95, 0.001, V_offset_guess-avg_period], 
+                       [w0_guess*1.05, 0.2, V_offset_guess+avg_period])
+            )
+            
+            # Generate smooth curve for the fit
+            v_smooth = np.linspace(voltage_data.min(), voltage_data.max(), 100)
+            f_smooth = fit_func(v_smooth, *popt)
+            flux_smooth = (v_smooth - popt[2]) / avg_period
+            
+            # Store results
+            quanta[f'quantum_{i}'] = {
+                'voltage': voltage_data,
+                'frequency': freq_data,
+                'flux': flux_data,
+                'voltage_range': (all_boundaries[i], all_boundaries[i + 1]),
+                'best_fit': {
+                    'w0': popt[0],
+                    'q0': popt[1],
+                    'V_period': avg_period,
+                    'V_offset': popt[2],
+                    'pcov': pcov
+                },
+                'fit_curve': {
+                    'voltage': v_smooth,
+                    'frequency': f_smooth,
+                    'flux': flux_smooth
+                }
+            }
+            
+            # Plot in corresponding subplot
+            ax = axs[i]
+            
+            # Plot data and fit
+            ax.scatter(voltage_data, freq_data, color=colors[i], alpha=0.5, label='Data')
+            ax.plot(v_smooth, f_smooth, '-', color=colors[i], alpha=0.8, label='Fit')
+            
+            # Create twin axis for flux
+            ax2 = ax.twiny()
+            ax2.set_xlim(min(flux_data), max(flux_data))
+            
+            # Labels and title
+            ax.set_xlabel('Voltage (mV)')
+            ax2.set_xlabel('Normalized Flux (Φ/Φ₀)')
+            ax.set_ylabel('Frequency (Hz)')
+            ax.set_title(f'Quantum {i}\n' + 
+                        f'w0 = {popt[0]:.3e} Hz, q0 = {popt[1]:.3f}\n' +
+                        f'V_offset = {popt[2]:.2f} mV')
+            
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            
+            print(f"\nQuantum {i} fit parameters:")
+            print(f"w0 = {popt[0]:.6e} Hz")
+            print(f"q0 = {popt[1]:.6f}")
+            print(f"V_offset = {popt[2]:.6f} mV")
+            
+        except RuntimeError as e:
+            print(f"Failed to fit quantum {i}: {str(e)}")
+            quanta[f'quantum_{i}'] = {
+                'voltage': voltage_data,
+                'frequency': freq_data,
+                'flux': flux_data,
+                'voltage_range': (all_boundaries[i], all_boundaries[i + 1]),
+                'best_fit': None
+            }
+    
+    plt.tight_layout()
+    
+    # Save the second plot
+    pdf.savefig(fig2)
+    
+    # Close the PDF file
+    pdf.close()
+    
+    # Show the plots
+    plt.show()
+    
+    results = {
+        'n_periods': n_quanta,
+        'maxima_indices': maxima_indices,
+        'maxima_voltages': maxima_voltages,
+        'period_estimate': avg_period,
+        'df_sorted': df_sorted,
+        'quanta': quanta,
+        'boundaries': boundary_info,
+        'is_single_quantum': n_quanta == 1
+    }
+    
+    # For saving to a file in the specified directory:
+    if os.path.isdir(save_path):
+        # If save_path is a directory, save the JSON in that directory
+        json_name = os.path.join(save_path, "flux_quanta_analysis.json")
+    else:
+        # If save_path is a file path (e.g. for PDF), use its directory for JSON
+        json_dir = os.path.dirname(save_path)
+        if not json_dir:  # If there's no directory part
+            json_dir = '.'
+        json_name = os.path.join(json_dir, "flux_quanta_analysis.json")
+
+    # Remove the DataFrame from results before serializing
+    results_for_json = {k: v for k, v in results.items() if k != 'df_sorted'}
+    serializable_results = make_json_serializable(results_for_json)
+    with open(json_name, "w") as f:
+        json.dump(serializable_results, f, indent=2)
+
+    # Return full results including DataFrame
+    return results
+
+
+def reject_frequency_outliers(df, freq_threshold=5.79e9):
+    """
+    Simple anomaly rejection that removes frequency points above a threshold.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame containing resonator measurements with 'f' column
+    freq_threshold : float, optional
+        Frequency threshold above which points are considered outliers (default: 5.79e9)
+    
+    Returns:
+    --------
+    tuple
+        (cleaned_df, mask, stats)
+    """
+    # Create mask for points below threshold
+    mask = df['f'] < freq_threshold
+    
+    # Create stats dictionary
+    stats = {
+        'total_initial_points': len(df),
+        'rejected_points': (~mask).sum(),
+        'remaining_points': mask.sum()
+    }
+    
+    # Create cleaned dataframe
+    cleaned_df = df[mask].copy()
+    
+    return cleaned_df, mask, stats

@@ -614,7 +614,7 @@ def write_metadata(metadata_file, acquisitionLength_sec, actualSampleRateMHz, fd
         
         f.write("=== End Experiment Metadata ===\n")
 
-def acquire_IQ_data(phi, f_clearing, P_clearing, num_traces=1, acquisitionLength_sec=5, origRateMHz=300, sampleRateMHz=10, averageTimeCycle=0, lowerBound=12, upperBound=40):
+def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisitionLength_sec=5, origRateMHz=300, sampleRateMHz=10, averageTimeCycle=0, lowerBound=12, upperBound=40):
     """
     Acquires IQ data from the Alazar card.
     
@@ -845,3 +845,94 @@ def verify_hpc_connection():
     logging.info("HPC connection verified successfully")
 
     
+def adjust_range(f, s21, f_min, f_max):
+    mask = (f >= f_min) & (f <= f_max)
+    return f[mask], s21[mask]
+
+def process_powersweep_fits(lf, nEntries, power, pdf_name, fmin, fmax):
+    """
+    Process fits for the given Labber log file and save the results to a PDF.
+    
+    Parameters:
+    lf (Labber.LogFile): The Labber log file object.
+    nEntries (int): The number of entries in the log file.
+    power (list): The list of power values for each entry.
+    pdf_name (str): The name of the PDF file to save the plots.
+    fmin (float): The minimum frequency for the fit range.
+    fmax (float): The maximum frequency for the fit range.
+    
+    """
+    from matplotlib.backends.backend_pdf import PdfPages
+    fits = {'f': [], 'Qint': [], 'Qext': [], 'power': [], 'Qtot': [], 'f_error': []}
+    fit_objects = []
+
+    # Create a PdfPages object to save all plots in one PDF
+    with PdfPages(pdf_name) as pdf:
+        for n in range(nEntries):
+            (frequency, S21) = lf.getTraceXY(entry=n)
+            frequency, S21 = adjust_range(frequency, S21, fmin, fmax)
+            r = reflection.LinearReflectionFitter(frequency, S21)
+            fit_objects.append(r)
+            # Generate plots
+            fig, (ax_magnitude, ax_phase, ax_complex) = see.triptych(
+                resonator=r, plot_initial=False, frequency_scale=1e-9,
+                figure_settings={'figsize': (16, 8), 'dpi': 300}
+            )
+            # Append power to the plot title
+            fig.suptitle(f'DA Attenuation: {power[n]} dBm')
+            ax_complex.legend()
+            # Save the current figure to the PDF
+            pdf.savefig(fig)
+            plt.close(fig)
+            # Append the fit results to the dictionary
+            fits['f'].append(r.resonance_frequency)
+            fits['Qtot'].append(r.Q_t)
+            fits['Qint'].append(r.Q_i)
+            fits['Qext'].append(r.Q_c)
+            fits['power'].append(power[n])
+            fits['f_error'].append(r.f_r_error)
+
+    return fits, fit_objects
+
+def process_fluxsweep_fits(lf, nEntries, voltage, pdf_name, span):
+    from matplotlib.backends.backend_pdf import PdfPages
+    fits = {'f': [], 'Qint': [], 'Qext': [], 'voltage': [], 'Qtot': [], 'f_error': []}
+    fit_objects = []
+
+    # Create a PdfPages object to save all plots in one PDF
+    with PdfPages(pdf_name) as pdf:
+        for n in range(nEntries):
+            (frequency, S21) = lf.getTraceXY(entry=n)
+            # Calculate the log magnitude of S21
+            S21_log_mag = 20 * np.log10(np.abs(S21))
+            # Find the index of the dip in the log magnitude
+            dip_index = np.argmin(S21_log_mag)
+            # Determine the center frequency
+            center_frequency = frequency[dip_index]
+            # Set fmin and fmax based on the span
+            fmin = center_frequency - span / 2
+            fmax = center_frequency + span / 2
+            # Adjust the frequency and S21 range
+            frequency, S21 = adjust_range(frequency, S21, fmin, fmax)
+            r = reflection.LinearReflectionFitter(frequency, S21)
+            fit_objects.append(r)
+            # Generate plots
+            fig, (ax_magnitude, ax_phase, ax_complex) = see.triptych(
+                resonator=r, plot_initial=False, frequency_scale=1e-9,
+                figure_settings={'figsize': (16, 8), 'dpi': 300}
+            )
+            # Append voltage to the plot title
+            fig.suptitle(f'Voltage: {voltage[n]} mV')
+            ax_complex.legend()
+            # Save the current figure to the PDF
+            pdf.savefig(fig)
+            plt.close(fig)
+            # Append the fit results to the dictionary
+            fits['f'].append(r.resonance_frequency)
+            fits['Qtot'].append(r.Q_t)
+            fits['Qint'].append(r.Q_i)
+            fits['Qext'].append(r.Q_c)
+            fits['voltage'].append(voltage[n])
+            fits['f_error'].append(r.f_r_error)
+
+    return fits, fit_objects

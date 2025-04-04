@@ -12,3 +12,7 @@ __pycache__
 data
 *.log
 .daemon.pid
+
+connect_to_dopey.sh
+flux_quanta_analysis.json
+flux_quanta_analysis.pdf

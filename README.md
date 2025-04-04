@@ -1,12 +1,26 @@
 # QP Experiments
 
-## Experiment 0: Flux Sweeping:
+## Table of Contents
+
+- [Experiment 0: Flux Sweeping](#experiment-0-flux-sweeping)
+- [Experiment 1: IQ Data Acquisition with Flux and Clearing Tone Variation](#experiment-1-acquiring-time-domain-iq-data-following-the-flux-curve-and-varying-the-clearing-tone-frequency-and-power)
+  - [Set Up](#set-up)
+    - [HPC](#hpc)
+    - [Measurements](#measurements)
+- [Experiment 2: IQ Data Acquisition](#experiment-2-acquiring-time-domain-iq-data)
+- [To Do](#to-do)
+
+<details>
+<summary><h2>Experiment 0: Flux Sweeping</h2></summary>
 
 A notebook that uses the SRS voltage source to sweep flux and record the resonator responce using the VNA.
 
 **notebook name:** [experiment0.ipynb](experiment0.ipynb)
 
-## Experiment 1: Acquiring time-domain IQ data following the flux curve and varying the clearing tone frequency and power
+</details>
+
+<details>
+<summary><h2>Experiment 1: Acquiring time-domain IQ data following the flux curve and varying the clearing tone frequency and power</h2></summary>
 
 **notebook name:** [experiment1.ipynb](experiment1.ipynb)
 
@@ -42,11 +56,12 @@ for phi in phi_arr:
             set_clearing_tone(f_clearing, P_clearing)
             acquire_IQ_data()
             wait()
-
-
 ```
 
-## Set Up:
+</details>
+
+<details>
+<summary><h2>Set Up</h2></summary>
 
 ### HPC:
 
@@ -57,6 +72,16 @@ Fill in the .env file with your HPC details
 ### Measurements:
 
 1. Flux tuning curve of the resonator
+</details>
+
+<details>
+<summary><h2>Experiment 2: Acquiring time-domain IQ data</h2></summary>
+
+A notebook that sets the LO at user specified parameters and takes the time domain IQ data with the Alazar card.
+
+**notebook name:** [experiment2.ipynb](experiment2.ipynb)
+
+</details>
 
 ---
 
