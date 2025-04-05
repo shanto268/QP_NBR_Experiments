@@ -646,12 +646,12 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
         
     Returns:
     --------
-    savefile : str
-        Path to the last saved binary file
+    metadata_files : list
+        List of paths to all metadata files created during acquisition
     """
     global SPATH, DA, PATH_TO_EXE, device_name, LO, Drive, TWPA_PUMP
     
-    last_savefile = None
+    metadata_files = []  # List to store all metadata file paths
 
     adc = ADC()
     adc.configureClock(MS_s = origRateMHz)
@@ -662,28 +662,31 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
     if f_clearing is not None and P_clearing is not None:
         StringForClearing = f"clearing_{f_clearing:.2f}GHz_{P_clearing:.1f}dBm".replace('.', 'p')
     else:
-        StringForClearing = "no_clearing"
+        StringForClearing = None
         
     for ds in tqdm(np.arange(lowerBound, upperBound+1, 2)):
         DA.setValue('Attenuation', ds)  # dB
         
-        # Format the phi string properly - ensure no leading or trailing spaces
+        # Format the phi string properly
         phi_str = f"phi_{phi:.3f}".replace('.', 'p').strip()
         
-        # Create directory structure with proper formatting
-        dir_path = os.path.join(SPATH, phi_str, f"DA{int(ds):02d}_SR{int(sampleRateMHz)}", StringForClearing)
-        
+        # Create directory structure
+        if StringForClearing is not None:
+            dir_path = os.path.join(SPATH, phi_str, f"DA{int(ds):02d}_SR{int(sampleRateMHz)}", StringForClearing)
+        else:
+            dir_path = os.path.join(SPATH, phi_str, f"DA{int(ds):02d}_SR{int(sampleRateMHz)}")
         try:
             os.makedirs(dir_path, exist_ok=True)
             logging.info(f"Created directory: {dir_path}")
         except OSError as e:
             logging.error(f"Failed to create directory {dir_path}: {e}")
-            raise  # Re-raise the exception instead of using a fallback path
+            raise
         
         # Create timestamp and filename
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         savefile = os.path.join(dir_path, f"{device_name}_{timestamp}.bin")
-        last_savefile = savefile
+        metadata_file = savefile[0:-4] + ".txt"
+        metadata_files.append(metadata_file)  # Add metadata file to list
 
         # Calculate actual sample rate
         samplesPerPoint = int(max(origRateMHz / sampleRateMHz, 1))
@@ -698,7 +701,7 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
             logging.error(f"Error during acquisition: {e}")
         
         # Write basic info to the metadata file
-        with open(savefile[0:-4] + ".txt", 'w') as f:  # 'w' mode for initial write
+        with open(metadata_file, 'w') as f:
             f.write("=== Basic Info ===\n")
             f.write(f"Timestamp: {time.strftime('%c')}\n")
             f.write(f"Digital Attenuator: {DA.getValue('Attenuation')} dB\n")
@@ -718,8 +721,7 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
     timeCycle = perf_counter() - now
     logging.info(f'Acquisition completed in {timeCycle:.6f} seconds.')
     
-    metatadata_file = savefile[0:-4] + ".txt"
-    return metatadata_file
+    return metadata_files
 
 def set_TWPA_pump(f=6.04, power=27):
     global TWPA_PUMP
