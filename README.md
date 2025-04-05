@@ -78,7 +78,6 @@ Fill in the .env file with your HPC details
 ## To Do:
 
 - [ ] Test the rsync HPC back up mechanism
-- [ ] Add feature to change .bin to a lower storage fingerprint file as a dameon
 - [ ] Add resonator circle fit code
 - [ ] Add the dynamic driving next mode code
 - [ ] Add feature to upload saved data to HPC via Globus API
