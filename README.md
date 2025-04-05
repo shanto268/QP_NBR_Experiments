@@ -78,7 +78,6 @@ Fill in the .env file with your HPC details
 ## To Do:
 
 - [ ] Test the rsync HPC back up mechanism
-- [ ] Add code to dynamically change the frequency search range based on multiple flux quanta fit data
 - [ ] Add feature to change .bin to a lower storage fingerprint file as a dameon
 - [ ] Add resonator circle fit code
 - [ ] Add the dynamic driving next mode code
