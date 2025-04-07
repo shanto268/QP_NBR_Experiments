@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from dotenv import load_dotenv, set_key
 from fitTools.utilities import Watt2dBm, dBm2Watt
+from matplotlib.colors import TwoSlopeNorm
 from pandas import DataFrame
 from scipy.optimize import curve_fit
 from srsinst.dc205 import DC205
@@ -948,3 +949,118 @@ def process_fluxsweep_fits(lf, nEntries, voltage, pdf_name, span):
             fits['f_error'].append(r.f_r_error)
 
     return fits, fit_objects
+
+def plot_gain_improvement_heatmap(df, s21_ref, improvement_threshold=None, figsize=(12, 8)):
+    """
+    Plot SNR improvement as a function of pump frequency and power.
+    
+    Parameters:
+    df (DataFrame): DataFrame containing pump_freq, pump_power, and S21 data
+    s21_ref (array): Reference S21 data (when pump is off)
+    improvement_threshold (float, optional): If provided, only show improvements above this threshold
+    figsize (tuple): Figure size (width, height)
+    
+    Returns:
+    matplotlib.figure.Figure: The figure object
+    """    
+    # Extract unique values to use for the plot
+    unique_pump_freqs = df['pump_freq'].unique()
+    unique_pump_powers = df['pump_power'].unique()
+    
+    # Create a 2D array to hold the SNR improvement values
+    snr_improvement_2d = np.full((len(unique_pump_powers), len(unique_pump_freqs)), np.nan)
+    
+    # Fill in the values from the DataFrame
+    for i, power in enumerate(unique_pump_powers):
+        for j, freq in enumerate(unique_pump_freqs):
+            # Get the row that matches this power and frequency combination
+            mask = (df['pump_freq'] == freq) & (df['pump_power'] == power)
+            if mask.any():  # Check if this combination exists in the DataFrame
+                # Get the SNR improvement value for this combination
+                snr_value = df.loc[mask, 'snr_improvement'].values[0]
+                
+                # If snr_value is a 1D array, compute its mean
+                if isinstance(snr_value, np.ndarray) and snr_value.ndim > 0:
+                    snr_value = np.mean(snr_value)
+                    
+                # Apply threshold if specified
+                if improvement_threshold is not None and snr_value < improvement_threshold:
+                    snr_improvement_2d[i, j] = np.nan
+                else:
+                    snr_improvement_2d[i, j] = snr_value
+    
+    # Create the plot
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Find min and max values for colorbar, excluding NaNs
+    vmin = np.nanmin(snr_improvement_2d)
+    vmax = np.nanmax(snr_improvement_2d)
+    
+    # Check if we have valid data
+    if np.isnan(vmin) or np.isnan(vmax):
+        print("No valid data to plot after applying threshold.")
+        return fig
+    
+    # Set up the colormap to handle NaN values with a distinct color (gray)
+    cmap = plt.cm.viridis
+    cmap.set_bad(color='lightgray')
+    
+    # Check if we need a diverging colormap
+    has_negative = vmin < 0
+    has_positive = vmax > 0
+    
+    if has_negative and has_positive:
+        # Use TwoSlopeNorm for diverging data
+        try:
+            norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+        except ValueError:
+            # Handle edge cases where vmin and vmax are too close
+            if abs(vmax - vmin) < 1e-10:
+                vmin -= 0.1
+                vmax += 0.1
+            norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+    else:
+        # Use standard normalization for single-sided data
+        from matplotlib.colors import Normalize
+        norm = Normalize(vmin=vmin, vmax=vmax)
+    
+    c = ax.pcolormesh(unique_pump_freqs, unique_pump_powers, snr_improvement_2d, 
+                      norm=norm, cmap=cmap, shading='auto')
+    
+    # Add labels and title
+    title = 'SNR Improvement as a Function of Pump Power and Frequency'
+    if improvement_threshold is not None:
+        title += f' (Threshold: {improvement_threshold} dB)'
+    ax.set_xlabel('Pump Frequency (GHz)', fontsize=12)
+    ax.set_ylabel('Pump Power (dBm)', fontsize=12)
+    ax.set_title(title, fontsize=14)
+    
+    # Add colorbar
+    cbar = plt.colorbar(c, ax=ax)
+    cbar.set_label('Gain (dB)', fontsize=12)
+    
+    # Find the best combination if we have valid data
+    if not np.all(np.isnan(snr_improvement_2d)):
+        best_i, best_j = np.unravel_index(np.nanargmax(snr_improvement_2d), snr_improvement_2d.shape)
+        best_power = unique_pump_powers[best_i]
+        best_freq = unique_pump_freqs[best_j]
+        best_snr = snr_improvement_2d[best_i, best_j]
+        
+        # Mark the best combination
+        ax.plot(best_freq, best_power, 'o', color='lime', markersize=10, markeredgecolor='black')
+        ax.text(best_freq, best_power*0.99, f"Best: {best_snr:.2f} dB", 
+                color='black', fontweight='bold', ha='center', va='top')
+        
+        print(f"Best Gain improvement of {best_snr:.2f} dB at pump frequency = {best_freq:.4f} GHz and pump power = {best_power:.2f} dBm")
+    
+    # Add a legend entry for missing or filtered data
+    import matplotlib.patches as mpatches
+    missing_label = "Missing data"
+    if improvement_threshold is not None:
+        missing_label += f" or < {improvement_threshold} dB"
+    missing_patch = mpatches.Patch(color='lightgray', label=missing_label)
+    ax.legend(handles=[missing_patch], loc='upper right')
+    
+    plt.tight_layout()
+    
+    return fig
