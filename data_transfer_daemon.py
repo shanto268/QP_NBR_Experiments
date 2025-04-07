@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 from dotenv import load_dotenv
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -201,6 +202,9 @@ class DataTransferHandler(FileSystemEventHandler):
             logging.info(f"Remote directory will be: {remote_dir}")
             
             try:
+                # Convert bin to npz
+                npz_path = self._convert_bin_to_npz(bin_path)
+                
                 # Create remote directory
                 mkdir_cmd = f"ssh {self.hpc_user}@{self.hpc_host} 'mkdir -p {remote_dir}'"
                 logging.info(f"Creating remote directory with command: {mkdir_cmd}")
@@ -214,7 +218,8 @@ class DataTransferHandler(FileSystemEventHandler):
                     continue
                 
                 transfer_success = True
-                for local_file in [bin_path, txt_path]:
+                # Transfer NPZ and TXT files
+                for local_file in [npz_path, txt_path]:
                     filename = os.path.basename(local_file)
                     remote_path = f"{self.hpc_user}@{self.hpc_host}:{os.path.join(remote_dir, filename)}"
                     remote_full_path = os.path.join(remote_dir, filename)
@@ -243,10 +248,12 @@ class DataTransferHandler(FileSystemEventHandler):
                     logging.info("Verification successful")
                 
                 if transfer_success:
-                    logging.info("Both files transferred successfully, cleaning up...")
-                    for local_file in [bin_path, txt_path]:
-                        os.remove(local_file)
-                        logging.info(f"Removed verified file: {local_file}")
+                    logging.info("All files transferred successfully, cleaning up...")
+                    # Remove original binary file, NPZ file, and txt file
+                    for local_file in [bin_path, npz_path, txt_path]:
+                        if os.path.exists(local_file):
+                            os.remove(local_file)
+                            logging.info(f"Removed verified file: {local_file}")
                     
                     del self.pending_files[bin_path]
                     self._cleanup_empty_directories(bin_path)
@@ -344,6 +351,78 @@ class DataTransferHandler(FileSystemEventHandler):
         except subprocess.CalledProcessError as e:
             logging.error(f"Failed to get remote checksum: {e}")
             return None
+    def _convert_bin_to_npz(self, bin_fpath):
+        """
+        Converts a .bin file (Alazar data) to a compressed .npz file.
+
+        Args:
+            bin_fpath (str): Path to the input .bin file.
+        """
+        if bin_fpath[-4:] != '.bin':
+            print(f'Warning: Input fpath "{bin_fpath}" should be a .bin file.')
+            return False
+
+        try:
+            data = np.fromfile(bin_fpath, dtype=np.uint16)
+            npz_fpath = bin_path[:-4] + '.npz'
+            np.savez_compressed(npz_fpath, data=data)  # Save the array with the key 'data'
+            print(f"Successfully converted '{bin_fpath}' to '{npz_fpath}'")
+            return npz_fpath
+        except Exception as e:
+            print(f"Error converting '{bin_fpath}' to '{npz_fpath}': {e}")
+            return None
+
+    def _convert_bin_to_npz_v1(self, bin_path):
+        """
+        Convert binary data file to NPZ format.
+        
+        Parameters:
+        -----------
+        bin_path : str
+            Path to the binary file
+            
+        Returns:
+        --------
+        str
+            Path to the created NPZ file
+        """
+        try:
+            # Read binary data
+            DATA = np.fromfile(bin_path, dtype=np.uint16)
+            # Convert to voltage
+            DATA = (DATA - 2047.5) * 0.4/2047.5
+            
+            # Get metadata from companion txt file
+            txt_path = bin_path[:-4] + '.txt'
+            if os.path.exists(txt_path):
+                with open(txt_path, 'r') as f:
+                    metadata_lines = f.read().splitlines()
+                    # Parse metadata for channels info
+                    channels_info = next((line for line in metadata_lines if "Channels:" in line), None)
+                    if channels_info and "AB" in channels_info:
+                        # Split data into two channels
+                        DATA = [DATA[ind::2] for ind in range(2)]
+            
+            # Create NPZ file path
+            npz_path = bin_path[:-4] + '.npz'
+            
+            # Save as NPZ
+            if isinstance(DATA, list):
+                # For two-channel data
+                np.savez_compressed(npz_path, 
+                                  channel_A=DATA[0],
+                                  channel_B=DATA[1])
+            else:
+                # For single-channel data
+                np.savez_compressed(npz_path, 
+                                  data=DATA)
+            
+            logging.info(f"Successfully converted {bin_path} to {npz_path}")
+            return npz_path
+        
+        except Exception as e:
+            logging.error(f"Error converting {bin_path} to NPZ: {str(e)}")
+            raise
 
 def run_watcher():
     """Run the file watcher with more frequent checks"""
