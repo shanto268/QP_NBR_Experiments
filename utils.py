@@ -17,6 +17,7 @@ from dotenv import load_dotenv, set_key
 from fitTools.utilities import Watt2dBm, dBm2Watt
 from matplotlib.colors import TwoSlopeNorm
 from pandas import DataFrame
+from resonator import reflection, see
 from scipy.optimize import curve_fit
 from srsinst.dc205 import DC205
 from tqdm import tqdm
@@ -37,8 +38,9 @@ PATH_TO_EXE = None
 SPATH = None
 device_name = None
 TWPA_PUMP = None
+SA = None
 
-def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None, twpa_pump=None):
+def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None, twpa_pump=None, sa=None):
     """
     Initialize global instrument variables for use in other functions.
     
@@ -57,7 +59,7 @@ def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None
     srs : instrument object, optional
         SRS instrument for flux biasing
     """
-    global VNA, DA, SMU, LO, Drive, vs, TWPA_PUMP
+    global VNA, DA, SMU, LO, Drive, vs, TWPA_PUMP, SA
     VNA = vna
     DA = da
     SMU = smu
@@ -65,6 +67,7 @@ def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None
     Drive = drive
     vs = srs
     TWPA_PUMP = twpa_pump
+    SA = sa
     
 def initializeLabberlogging(lfvna):
     global lfVNA

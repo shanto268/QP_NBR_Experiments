@@ -77,6 +77,7 @@ Fill in the .env file with your HPC details
 
 ## To Do:
 
+- [ ] Fix the saving of the resonator flux fits to the Labber directory
 - [ ] Test the rsync HPC back up mechanism
 - [ ] Add resonator circle fit code
 - [ ] Add the dynamic driving next mode code
