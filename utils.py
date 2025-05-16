@@ -7,6 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 from time import perf_counter, sleep, strftime
+from typing import Tuple
 
 import fitTools.quasiparticleFunctions as qp
 import h5py
@@ -39,6 +40,73 @@ SPATH = None
 device_name = None
 TWPA_PUMP = None
 SA = None
+
+def scale_voltage_range(old_range: Tuple[float, float], 
+                        old_resistance: float, 
+                        new_resistance: float, 
+                        invariant: str = 'power') -> Tuple[float, float]:
+    """
+    Scale voltage sweep range according to change in resistance.
+
+    Parameters
+    ----------
+    old_range : Tuple[float, float]
+        (min_voltage, max_voltage) in volts.
+    old_resistance : float
+        Original resistance in ohms.
+    new_resistance : float
+        New resistance in ohms.
+    invariant : str
+        What to preserve: 'current', 'power' (or 'energy').
+
+    Returns
+    -------
+    Tuple[float, float]
+        New (min_voltage, max_voltage) in volts.
+    """
+    if invariant == 'current':
+        scale_factor = new_resistance / old_resistance
+    elif invariant in ['power', 'energy']:
+        scale_factor = np.sqrt(new_resistance / old_resistance)
+    else:
+        raise ValueError("invariant must be one of: 'current', 'power', 'energy'")
+
+    min_v, max_v = old_range
+    return min_v * scale_factor, max_v * scale_factor
+
+
+def scale_sweep_rate(old_rate: float,
+                     old_resistance: float,
+                     new_resistance: float,
+                     invariant: str = 'power') -> float:
+    """
+    Scale voltage sweep rate according to change in resistance.
+
+    Parameters
+    ----------
+    old_rate : float
+        Original sweep rate in volts/sec.
+    old_resistance : float
+        Original resistance in ohms.
+    new_resistance : float
+        New resistance in ohms.
+    invariant : str
+        What to preserve: 'current', 'power' (or 'energy').
+
+    Returns
+    -------
+    float
+        New sweep rate in volts/sec.
+    """
+    if invariant == 'current':
+        scale_factor = new_resistance / old_resistance
+    elif invariant in ['power', 'energy']:
+        scale_factor = np.sqrt(new_resistance / old_resistance)
+    else:
+        raise ValueError("invariant must be one of: 'current', 'power', 'energy'")
+
+    return old_rate * scale_factor
+
 
 def initialize_instruments(vna, da=None, smu=None, lo=None, drive=None, srs=None, twpa_pump=None, sa=None):
     """
@@ -270,11 +338,14 @@ def connect_SRS(mode="serial", channel='COM3', ID=115200, range='range1'):
     vs.config.output = 'on'
     return vs
 
-def turn_off_SRS(vs):
+def turn_off_SRS(vs, volt_unit):
     """
     Sets the SRS output to 0 V and turns off the output.
     """
-    set_flux_bias_srs(0, 5e-5)
+    if volt_unit == "mV":
+        set_flux_bias_srs_in_mV(0, 5e-5)
+    elif volt_unit == "V":
+        set_flux_bias_srs_in_V(0,0.01)
     vs.config.output = 'off'
 
 def disconnect_SRS(vs):
@@ -283,9 +354,36 @@ def disconnect_SRS(vs):
 def turn_on_SRS(vs):
     vs.config.output = 'on'
 
-def set_flux_bias_srs(voltage, step = 1e-3, lower_bound=-0.6, upper_bound=0.6): # voltage in V
+def set_flux_bias_srs_in_V(voltage, step = 0.005, lower_bound=-16, upper_bound=16): # voltage in V
     """
-    Set the flux bias using the SRS电源.
+    Set the flux bias using the SRS.
+    voltage: voltage to set the flux bias to in V
+    step: step size in V
+    lower_bound: lower bound of the voltage in V
+    upper_bound: upper bound of the voltage in V
+    """
+    global vs
+    if vs.config.output == 'off':
+        vs.config.output = 'on'
+        vs.config.voltage_range = 'range100'
+    # print(f"Output status: {vs.config.output}")
+    #print(f"Voltage range: {vs.config.voltage_range}")
+    if voltage > upper_bound or voltage < lower_bound:
+        raise ValueError('Voltage out of range')
+    start_voltage = vs.setting.voltage
+    print(f"Setting FFL bias to {voltage} V from {start_voltage} V")
+    if voltage <= start_voltage:
+        step = -step
+    voltage_list = np.round(np.arange(start_voltage, voltage + step/2, step), 7)
+    for value in voltage_list[1:]:
+        vs.setting.voltage = value
+        #print(f"Setting voltage to: {value} V")
+        time.sleep(0.5)
+    #print("Voltage sweep complete.")
+
+def set_flux_bias_srs_in_mV(voltage, step = 1e-3, lower_bound=-0.6, upper_bound=0.6): # voltage in V
+    """
+    Set the flux bias using the SRS.
     voltage: voltage to set the flux bias to in V
     step: step size in V
     lower_bound: lower bound of the voltage in V
@@ -381,7 +479,7 @@ def turn_off_clearing():
     Turn off the clearing tone generator.
     """
     global Drive
-    Drive.setValue('Output status',False)
+    Drive.setValue('Output',False)
     sleep(0.05)
 
 def get_vna_trace(f, span=10e6, power=5, avg=25, show_plot=False):
@@ -561,7 +659,15 @@ def turn_off_LO():
     global LO
     LO.setValue('Output status',False)
     sleep(0.05)
-    
+
+def turn_on_LO():
+    """
+    Turn off the drive signal generator.
+    """
+    global LO
+    LO.setValue('Output status',True)
+    sleep(0.05)
+
 def set_LO_tone(f, power=16):
     """
     Set the drive tone to the given frequency.
@@ -571,7 +677,7 @@ def set_LO_tone(f, power=16):
     LO.setValue('Frequency',f)
     LO.setValue('Power',power)
     LO.setValue('Output status',True)
-    print(f"LO tone set to {LO.getValue('Frequency')*1e-9:.6f} GHz")
+    print(f"LO tone set to {LO.getValue('Frequency')*1e-9:.6f} GHz with power {LO.getValue('Power')} dBm")
     sleep(0.05)
     
 def set_clearing_tone(f, power):
@@ -583,7 +689,7 @@ def set_clearing_tone(f, power):
     global Drive
     Drive.setValue('Frequency',f*1e9)
     Drive.setValue('Power',power)
-    Drive.setValue('Output status',True)
+    Drive.setValue('Output',True)
     print(f"Clearing tone set to {Drive.getValue('Frequency')*1e-9:.6f} GHz with power {Drive.getValue('Power')} dBm")
     sleep(0.05)
 
@@ -621,7 +727,7 @@ def write_metadata(metadata_file, acquisitionLength_sec, actualSampleRateMHz, fd
         
         f.write("=== End Experiment Metadata ===\n")
 
-def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisitionLength_sec=5, origRateMHz=300, sampleRateMHz=10, averageTimeCycle=0, lowerBound=12, upperBound=40):
+def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisitionLength_sec=5, origRateMHz=300, sampleRateMHz=10, averageTimeCycle=0, lowerBound=12, upperBound=40, spacing=2):
     """
     Acquires IQ data from the Alazar card.
     
@@ -647,6 +753,8 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
         Lower bound of the DA attenuator in dB
     upperBound : int, optional
         Upper bound of the DA attenuator in dB
+    spacing : int, optional
+        Spacing of the DA attenuator in dB
         
     Returns:
     --------
@@ -665,10 +773,12 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
     # Create a safe directory name for the clearing tone parameters
     if f_clearing is not None and P_clearing is not None:
         StringForClearing = f"clearing_{f_clearing:.2f}GHz_{P_clearing:.1f}dBm".replace('.', 'p')
+    elif f_clearing is not None and P_clearing is None:
+        StringForClearing = f"no_clearing_REF_for_{f_clearing:.2f}GHz".replace('.', 'p')
     else:
         StringForClearing = None
         
-    for ds in tqdm(np.arange(lowerBound, upperBound+1, 2)):
+    for ds in tqdm(np.arange(lowerBound, upperBound+1, spacing)):
         DA.setValue('Attenuation', ds)  # dB
         
         # Format the phi string properly
@@ -728,14 +838,18 @@ def acquire_IQ_data(phi, f_clearing=None, P_clearing=None, num_traces=1, acquisi
     return metadata_files
 
 def set_TWPA_pump(f=6.04, power=27):
+    """
+    f: frequency to set the TWPA pump to in GHz
+    power: power to set the TWPA pump to in dBm
+    """
     global TWPA_PUMP
     TWPA_PUMP.setValue('Frequency', f*1e9)
     TWPA_PUMP.setValue('Power', power)
-    TWPA_PUMP.setValue('Output', True)
+    TWPA_PUMP.setValue('Output status', True)
 
 def turn_off_TWPA_pump():
     global TWPA_PUMP
-    TWPA_PUMP.setValue('Output', False)
+    TWPA_PUMP.setValue('Output status', False)
 
 def turn_off_Drive():
     global Drive
@@ -1065,5 +1179,5 @@ def plot_gain_improvement_heatmap(df, s21_ref, improvement_threshold=None, figsi
     ax.legend(handles=[missing_patch], loc='upper right')
     
     plt.tight_layout()
-    
+    plt.show()
     return fig
